@@ -49,33 +49,11 @@
 //! [clip.rs]: ../clip/index.html
 //!
 
-use api::{BorderRadius, ClipMode};
+use api::{BorderRadius, ClipMode, EdgeAaSegmentMask};
 use api::units::*;
 use std::{cmp, usize};
-use crate::util::{extract_inner_rect_safe};
+use crate::util::{extract_inner_rect_safe, RectHelpers};
 use smallvec::SmallVec;
-
-bitflags! {
-    /// Each bit of the edge AA mask is:
-    /// 0, when the edge of the primitive needs to be considered for AA
-    /// 1, when the edge of the segment needs to be considered for AA
-    ///
-    /// *Note*: the bit values have to match the shader logic in
-    /// `write_transform_vertex()` function.
-    #[cfg_attr(feature = "capture", derive(Serialize))]
-    #[cfg_attr(feature = "replay", derive(Deserialize))]
-    #[derive(MallocSizeOf)]
-    pub struct EdgeAaSegmentMask: u8 {
-        ///
-        const LEFT = 0x1;
-        ///
-        const TOP = 0x2;
-        ///
-        const RIGHT = 0x4;
-        ///
-        const BOTTOM = 0x8;
-    }
-}
 
 bitflags! {
     pub struct ItemFlags: u8 {
@@ -302,7 +280,7 @@ impl SegmentBuilder {
     ) {
         self.has_interesting_clips = true;
 
-        if inner_rect.is_empty() {
+        if !inner_rect.is_well_formed_and_nonempty() {
             self.items.push(Item::new(
                 outer_rect,
                 None,
@@ -353,8 +331,6 @@ impl SegmentBuilder {
             ),
         ];
 
-        self.items.reserve(segments.len() + 1);
-
         for segment in segments {
             self.items.push(Item::new(
                 *segment,
@@ -401,8 +377,6 @@ impl SegmentBuilder {
                         let p1 = inner.origin;
                         let p2 = inner.bottom_right();
                         let p3 = rect.bottom_right();
-
-                        self.items.reserve(9);
 
                         let corner_segments = &[
                             LayoutRect::new(
@@ -705,9 +679,9 @@ fn emit_segment_if_needed(
 
 #[cfg(test)]
 mod test {
-    use api::{BorderRadius, ClipMode};
+    use api::{BorderRadius, ClipMode, EdgeAaSegmentMask};
     use api::units::{LayoutPoint, LayoutRect, LayoutSize};
-    use super::{Segment, SegmentBuilder, EdgeAaSegmentMask};
+    use super::{Segment, SegmentBuilder};
     use std::cmp;
 
     fn rect(x0: f32, y0: f32, x1: f32, y1: f32) -> LayoutRect {

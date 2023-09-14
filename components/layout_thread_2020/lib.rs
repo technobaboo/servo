@@ -91,7 +91,7 @@ use style::thread_state::{self, ThreadState};
 use style::traversal::DomTraversal;
 use style::traversal_flags::TraversalFlags;
 use style_traits::{CSSPixel, DevicePixel, SpeculativePainter};
-use webrender_api::{units, HitTestFlags};
+use webrender_api::{units, HitTestFlags, ScrollClamping};
 
 /// Information needed by the layout thread.
 pub struct LayoutThread {
@@ -1169,8 +1169,11 @@ impl LayoutThread {
             .insert(state.scroll_id, state.scroll_offset);
 
         let point = Point2D::new(-state.scroll_offset.x, -state.scroll_offset.y);
-        self.webrender_api
-            .send_scroll_node(units::LayoutPoint::from_untyped(point), state.scroll_id);
+        self.webrender_api.send_scroll_node(
+            units::LayoutPoint::from_untyped(point),
+            state.scroll_id,
+            ScrollClamping::ToContentBounds,
+        );
     }
 
     fn set_scroll_states<'a, 'b>(
@@ -1277,7 +1280,7 @@ impl LayoutThread {
             .maybe_observe_paint_time(self, epoch, is_contentful);
 
         self.webrender_api
-            .send_display_list(display_list.compositor_info, display_list.wr.finalize().1);
+            .send_display_list(display_list.compositor_info, display_list.wr.finalize());
 
         self.update_iframe_sizes(iframe_sizes);
 

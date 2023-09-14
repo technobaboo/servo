@@ -156,8 +156,7 @@ use servo_rand::{random, Rng, ServoRng, SliceRandom};
 use servo_url::{Host, ImmutableOrigin, ServoUrl};
 use style_traits::CSSPixel;
 use webgpu::{self, WebGPU, WebGPURequest};
-use webrender::{RenderApi, RenderApiSender};
-use webrender_api::DocumentId;
+use webrender_api::{DocumentId, RenderApi, RenderApiSender};
 use webrender_traits::WebrenderExternalImageRegistry;
 
 use crate::browsingcontext::{

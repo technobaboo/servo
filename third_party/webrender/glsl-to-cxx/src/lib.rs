@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-extern crate glsl;
+use glsl;
 
 mod hir;
 
@@ -61,6 +61,8 @@ pub fn translate(args: &mut dyn Iterator<Item = String>) -> String {
         .to_string_lossy()
         .to_string();
 
+    let frag_include = args.next();
+
     let (vs_state, vs_hir, vs_is_frag) = parse_shader(vertex_file);
     let (fs_state, fs_hir, fs_is_frag) = parse_shader(frag_file);
 
@@ -77,6 +79,7 @@ pub fn translate(args: &mut dyn Iterator<Item = String>) -> String {
         vs_hir,
         vs_is_frag,
         &uniform_indices,
+        None,
     );
     result += "\n";
     result += &translate_shader(
@@ -85,6 +88,7 @@ pub fn translate(args: &mut dyn Iterator<Item = String>) -> String {
         fs_hir,
         fs_is_frag,
         &uniform_indices,
+        frag_include,
     );
     result
 }
@@ -116,6 +120,7 @@ fn translate_shader(
     hir: hir::TranslationUnit,
     is_frag: bool,
     uniform_indices: &UniformIndices,
+    include_file: Option<String>,
 ) -> String {
     //println!("{:#?}", state);
 
@@ -180,6 +185,8 @@ fn translate_shader(
         uses_discard: false,
         used_fragcoord: Cell::new(0),
         use_perspective: false,
+        has_draw_span_rgba8: false,
+        has_draw_span_r8: false,
         used_globals: RefCell::new(Vec::new()),
         texel_fetches: RefCell::new(Vec::new()),
     };
@@ -207,6 +214,10 @@ fn translate_shader(
         write!(state, "typedef {} Self;\n", part_name);
 
         show_translation_unit(&mut state, &hir);
+
+        if let Some(include_file) = include_file {
+            write_include_file(&mut state, include_file);
+        }
 
         let pruned_inputs: Vec<_> = inputs
             .iter()
@@ -239,7 +250,6 @@ fn translate_shader(
             write!(state, " return this;\n}}\n");
             write!(state, "FragmentShaderImpl* get_fragment_shader() override {{\n");
             write!(state, " return this;\n}}\n");
-            write!(state, "const char* get_name() const override {{ return \"{}\"; }}\n", name);
             write!(state, "static ProgramImpl* loader() {{ return new {}_program; }}\n", name);
             write!(state, "}};\n\n");
         }
@@ -292,7 +302,8 @@ fn write_program_samplers(state: &mut OutputState, uniform_indices: &UniformIndi
         match tk {
             hir::TypeKind::Sampler2D
             | hir::TypeKind::Sampler2DRect
-            | hir::TypeKind::ISampler2D => {
+            | hir::TypeKind::ISampler2D
+            | hir::TypeKind::Sampler2DArray => {
                 write!(state, " ");
                 show_type_kind(state, &tk);
                 let suffix = if let hir::StorageClass::Sampler(format) = storage {
@@ -315,7 +326,8 @@ fn write_program_samplers(state: &mut OutputState, uniform_indices: &UniformIndi
         match tk {
             hir::TypeKind::Sampler2D
             | hir::TypeKind::Sampler2DRect
-            | hir::TypeKind::ISampler2D => {
+            | hir::TypeKind::ISampler2D
+            | hir::TypeKind::Sampler2DArray => {
                 write!(state, "  case {}:\n", index);
                 write!(state, "   {}_slot = value;\n", name);
                 write!(state, "   return true;\n");
@@ -342,6 +354,9 @@ fn write_bind_textures(state: &mut OutputState, uniforms: &UniformIndices) {
                         name),
                     hir::TypeKind::ISampler2D => write!(state,
                         " {0} = lookup_isampler(&samplers.{0}_impl, samplers.{0}_slot);\n",
+                        name),
+                    hir::TypeKind::Sampler2DArray => write!(state,
+                        " {0} = lookup_sampler_array(&samplers.{0}_impl, samplers.{0}_slot);\n",
                         name),
                     _ => {}
                 };
@@ -393,8 +408,9 @@ fn write_set_uniform_4fv(
         if float4_compatible(tk.clone()) {
             write!(
                 state,
-                "  self->{} = vec4_scalar::load_from_ptr(value);\n",
-                name
+                "  self->{} = {}_scalar(value);\n",
+                name,
+                tk.glsl_primitive_type_name().unwrap(),
             );
         } else {
             write!(state, "  assert(0); // {}\n", name);
@@ -535,9 +551,6 @@ fn write_load_attribs(state: &mut OutputState, attribs: &[hir::SymRef]) {
 fn write_store_outputs(state: &mut OutputState, outputs: &[hir::SymRef]) {
     let is_scalar = state.is_scalar.replace(true);
     write!(state, "public:\nstruct InterpOutputs {{\n");
-    if state.hir.used_clip_dist != 0 {
-       state.write(" Float swgl_ClipDistance;\n");
-    }
     for i in outputs {
         let sym = state.hir.sym(*i);
         match &sym.decl {
@@ -563,15 +576,6 @@ fn write_store_outputs(state: &mut OutputState, outputs: &[hir::SymRef]) {
         state,
         "    auto* dest = reinterpret_cast<InterpOutputs*>(dest_ptr);\n"
     );
-    if state.hir.used_clip_dist != 0 {
-        for (i, comp) in "xyzw".chars().enumerate() {
-            if (state.hir.used_clip_dist & (1 << i)) != 0 {
-                write!(state, "    dest->swgl_ClipDistance.{} = get_nth(gl_ClipDistance[{}], n);\n", comp, i);
-            } else {
-                write!(state, "    dest->swgl_ClipDistance.{} = 0.0f;\n", comp);
-            }
-        }
-    }
     for i in outputs {
         let sym = state.hir.sym(*i);
         match &sym.decl {
@@ -622,7 +626,7 @@ fn write_read_inputs(state: &mut OutputState, inputs: &[hir::SymRef]) {
 
     write!(state,
         "static void read_interp_inputs(\
-            Self *self, const InterpInputs *init, const InterpInputs *step) {{\n");
+            Self *self, const InterpInputs *init, const InterpInputs *step, float step_width) {{\n");
     for i in inputs {
         let sym = state.hir.sym(*i);
         match &sym.decl {
@@ -636,7 +640,7 @@ fn write_read_inputs(state: &mut OutputState, inputs: &[hir::SymRef]) {
                     );
                     write!(
                         state,
-                        "  self->interp_step.{0} = step->{0} * 4.0f;\n",
+                        "  self->interp_step.{0} = step->{0} * step_width;\n",
                         name
                     );
                 }
@@ -653,7 +657,7 @@ fn write_read_inputs(state: &mut OutputState, inputs: &[hir::SymRef]) {
     if state.use_perspective {
         write!(state,
             "static void read_perspective_inputs(\
-                Self *self, const InterpInputs *init, const InterpInputs *step) {{\n");
+                Self *self, const InterpInputs *init, const InterpInputs *step, float step_width) {{\n");
         if has_varying {
             write!(state, "  Float w = 1.0f / self->gl_FragCoord.w;\n");
         }
@@ -671,7 +675,7 @@ fn write_read_inputs(state: &mut OutputState, inputs: &[hir::SymRef]) {
                         write!(state, "  self->{0} = self->interp_perspective.{0} * w;\n", name);
                         write!(
                             state,
-                            "  self->interp_step.{0} = step->{0} * 4.0f;\n",
+                            "  self->interp_step.{0} = step->{0} * step_width;\n",
                             name
                         );
                     }
@@ -682,12 +686,9 @@ fn write_read_inputs(state: &mut OutputState, inputs: &[hir::SymRef]) {
         write!(state, "}}\n");
     }
 
-    write!(state, "ALWAYS_INLINE void step_interp_inputs(int steps = 4) {{\n");
+    write!(state, "ALWAYS_INLINE void step_interp_inputs() {{\n");
     if (used_fragcoord & 1) != 0 {
-        write!(state, "  step_fragcoord(steps);\n");
-    }
-    if !inputs.is_empty() {
-        write!(state, "  float chunks = steps * 0.25f;\n");
+        write!(state, "  step_fragcoord();\n");
     }
     for i in inputs {
         let sym = state.hir.sym(*i);
@@ -695,7 +696,7 @@ fn write_read_inputs(state: &mut OutputState, inputs: &[hir::SymRef]) {
             hir::SymDecl::Global(_, _, _, run_class) => {
                 if *run_class != hir::RunClass::Scalar {
                     let name = sym.name.as_str();
-                    write!(state, "  {0} += interp_step.{0} * chunks;\n", name);
+                    write!(state, "  {0} += interp_step.{0};\n", name);
                 }
             }
             _ => panic!(),
@@ -704,14 +705,11 @@ fn write_read_inputs(state: &mut OutputState, inputs: &[hir::SymRef]) {
     write!(state, "}}\n");
 
     if state.use_perspective {
-        write!(state, "ALWAYS_INLINE void step_perspective_inputs(int steps = 4) {{\n");
+        write!(state, "ALWAYS_INLINE void step_perspective_inputs() {{\n");
         if (used_fragcoord & 1) != 0 {
-            write!(state, "  step_fragcoord(steps);\n");
+            write!(state, "  step_fragcoord();\n");
         }
-        write!(state, "  step_perspective(steps);\n");
-        if !inputs.is_empty() {
-            write!(state, "  float chunks = steps * 0.25f;\n");
-        }
+        write!(state, "  step_perspective();\n");
         if has_varying {
             write!(state, "  Float w = 1.0f / gl_FragCoord.w;\n");
         }
@@ -721,7 +719,7 @@ fn write_read_inputs(state: &mut OutputState, inputs: &[hir::SymRef]) {
                 hir::SymDecl::Global(_, _, _, run_class) => {
                     if *run_class != hir::RunClass::Scalar {
                         let name = sym.name.as_str();
-                        write!(state, "  interp_perspective.{0} += interp_step.{0} * chunks;\n", name);
+                        write!(state, "  interp_perspective.{0} += interp_step.{0};\n", name);
                         write!(state, "  {0} = w * interp_perspective.{0};\n", name);
                     }
                 }
@@ -730,6 +728,58 @@ fn write_read_inputs(state: &mut OutputState, inputs: &[hir::SymRef]) {
         }
         write!(state, "}}\n");
     }
+
+    if state.has_draw_span_rgba8 || state.has_draw_span_r8 {
+        write!(
+            state,
+            "ALWAYS_INLINE void step_interp_inputs(int chunks) {{\n"
+        );
+        if (used_fragcoord & 1) != 0 {
+            write!(state, "  step_fragcoord(chunks);\n");
+        }
+        for i in inputs {
+            let sym = state.hir.sym(*i);
+            match &sym.decl {
+                hir::SymDecl::Global(_, _, _, run_class) => {
+                    if *run_class != hir::RunClass::Scalar {
+                        let name = sym.name.as_str();
+                        write!(state, "  {0} += interp_step.{0} * chunks;\n", name);
+                    }
+                }
+                _ => panic!(),
+            }
+        }
+        write!(state, "}}\n");
+    }
+}
+
+fn write_include_file(state: &mut OutputState, include_file: String) {
+    let include_contents = std::fs::read_to_string(&include_file).unwrap();
+
+    let mut offset = 0;
+    while offset < include_contents.len() {
+        let s = &include_contents[offset ..];
+        if let Some(start_proto) = s.find("draw_span") {
+            let s = &s[start_proto ..];
+            if let Some(end_proto) = s.find(')') {
+                let proto = &s[.. end_proto];
+                if proto.contains("uint32_t") {
+                    state.has_draw_span_rgba8 = true;
+                } else if proto.contains("uint8_t") {
+                    state.has_draw_span_r8 = true;
+                }
+                offset += start_proto + end_proto;
+                continue;
+            }
+        }
+        break;
+    }
+
+    let include_name = std::path::Path::new(&include_file)
+        .file_name()
+        .unwrap()
+        .to_string_lossy();
+    write!(state, "\n#include \"{}\"\n\n", include_name);
 }
 
 pub struct OutputState {
@@ -754,6 +804,8 @@ pub struct OutputState {
     uses_discard: bool,
     used_fragcoord: Cell<i32>,
     use_perspective: bool,
+    has_draw_span_rgba8: bool,
+    has_draw_span_r8: bool,
     used_globals: RefCell<Vec<hir::SymRef>>,
     texel_fetches: RefCell<Vec<(hir::SymRef, hir::SymRef, hir::TexelFetchOffsets)>>,
 }
@@ -822,7 +874,7 @@ fn add_used_global(state: &OutputState, i: &hir::SymRef) {
 pub fn show_sym(state: &OutputState, i: &hir::SymRef) {
     let sym = state.hir.sym(*i);
     match &sym.decl {
-        hir::SymDecl::NativeFunction(_, ref cxx_name, _) => {
+        hir::SymDecl::NativeFunction(_, ref cxx_name) => {
             let mut name = sym.name.as_str();
             if state.output_cxx {
                 name = cxx_name.unwrap_or(name);
@@ -1515,10 +1567,8 @@ fn expr_run_class(state: &OutputState, expr: &hir::Expr) -> hir::RunClass {
             });
             match fun {
                 hir::FunIdentifier::Identifier(ref sym) => match &state.hir.sym(*sym).decl {
-                    hir::SymDecl::NativeFunction(_, _, ref ret_class) => {
-                        if *ret_class != hir::RunClass::Unknown {
-                            *ret_class
-                        } else if arg_mask != 0 {
+                    hir::SymDecl::NativeFunction(..) => {
+                        if arg_mask != 0 {
                             hir::RunClass::Vector
                         } else {
                             hir::RunClass::Scalar
@@ -1846,21 +1896,33 @@ pub fn show_hir_expr_inner(state: &OutputState, expr: &hir::Expr, top_level: boo
                                         &state.hir, &args[0], &args[1], &args[3],
                                     ) {
                                         let base_sym = state.hir.sym(base);
-                                        let sampler_sym = state.hir.sym(sampler);
-                                        add_used_global(state, &sampler);
-                                        if let hir::SymDecl::Global(..) = &base_sym.decl {
-                                            add_used_global(state, &base);
+                                        if symbol_run_class(&base_sym.decl, state.vector_mask)
+                                            == hir::RunClass::Scalar
+                                        {
+                                            let sampler_sym = state.hir.sym(sampler);
+                                            add_used_global(state, &sampler);
+                                            if let hir::SymDecl::Global(..) = &base_sym.decl {
+                                                add_used_global(state, &base);
+                                            }
+                                            if y != 0 {
+                                                write!(
+                                                    state,
+                                                    "{}_{}_fetch[{}+{}*{}->stride]",
+                                                    sampler_sym.name,
+                                                    base_sym.name,
+                                                    x,
+                                                    y,
+                                                    sampler_sym.name
+                                                );
+                                            } else {
+                                                write!(
+                                                    state,
+                                                    "{}_{}_fetch[{}]",
+                                                    sampler_sym.name, base_sym.name, x
+                                                );
+                                            }
+                                            return;
                                         }
-                                        write!(
-                                            state,
-                                            "texelFetchUnchecked({}, {}_{}_fetch, {}, {})",
-                                            sampler_sym.name,
-                                            sampler_sym.name,
-                                            base_sym.name,
-                                            x,
-                                            y,
-                                        );
-                                        return;
                                     }
                                 }
                                 show_sym(state, name)
@@ -2296,12 +2358,15 @@ pub fn show_declaration(state: &mut OutputState, d: &hir::Declaration) {
                 let base = list.head.name;
                 let base_sym = state.hir.sym(base);
                 if let hir::SymDecl::Local(..) = &base_sym.decl {
-                    let mut texel_fetches = state.texel_fetches.borrow_mut();
-                    while let Some(idx) = texel_fetches.iter().position(|&(_, b, _)| b == base)
+                    if symbol_run_class(&base_sym.decl, state.vector_mask) == hir::RunClass::Scalar
                     {
-                        let (sampler, _, offsets) = texel_fetches.remove(idx);
-                        let sampler_sym = state.hir.sym(sampler);
-                        define_texel_fetch_ptr(state, &base_sym, &sampler_sym, &offsets);
+                        let mut texel_fetches = state.texel_fetches.borrow_mut();
+                        while let Some(idx) = texel_fetches.iter().position(|&(_, b, _)| b == base)
+                        {
+                            let (sampler, _, offsets) = texel_fetches.remove(idx);
+                            let sampler_sym = state.hir.sym(sampler);
+                            define_texel_fetch_ptr(state, &base_sym, &sampler_sym, &offsets);
+                        }
                     }
                 }
             }
@@ -2319,22 +2384,19 @@ pub fn show_declaration(state: &mut OutputState, d: &hir::Declaration) {
             //state.write(";\n");
         }
         hir::Declaration::Global(ref qual, ref identifiers) => {
-            // We only want to output GLSL layout qualifiers if not C++
-            if !state.output_cxx {
-                show_type_qualifier(state, &qual);
+            show_type_qualifier(state, &qual);
 
-                if !identifiers.is_empty() {
-                    let mut iter = identifiers.iter();
-                    let first = iter.next().unwrap();
-                    show_identifier(state, first);
+            if !identifiers.is_empty() {
+                let mut iter = identifiers.iter();
+                let first = iter.next().unwrap();
+                show_identifier(state, first);
 
-                    for identifier in iter {
-                        let _ = write!(state, ", {}", identifier);
-                    }
+                for identifier in iter {
+                    let _ = write!(state, ", {}", identifier);
                 }
-
-                state.write(";\n");
             }
+
+            state.write(";\n");
         }
         hir::Declaration::StructDefinition(ref sym) => {
             show_sym_decl(state, sym);
@@ -2610,32 +2672,32 @@ fn define_texel_fetch_ptr(
     offsets: &hir::TexelFetchOffsets,
 ) {
     show_indent(state);
-    let ptr_type = if let hir::SymDecl::Global(_, _, ty, _) = &sampler_sym.decl {
-        if symbol_run_class(&base_sym.decl, state.vector_mask) == hir::RunClass::Scalar {
-            match ty.kind {
-                hir::TypeKind::Sampler2D
-                | hir::TypeKind::Sampler2DRect => "vec4_scalar*",
-                hir::TypeKind::ISampler2D => "ivec4_scalar*",
-                _ => panic!(),
+    if let hir::SymDecl::Global(_, _, ty, _) = &sampler_sym.decl {
+        match ty.kind {
+            hir::TypeKind::Sampler2D
+            | hir::TypeKind::Sampler2DRect => {
+                write!(
+                    state,
+                    "vec4_scalar* {}_{}_fetch = ",
+                    sampler_sym.name, base_sym.name
+                );
             }
-        } else {
-            "I32"
+            hir::TypeKind::ISampler2D => {
+                write!(
+                    state,
+                    "ivec4_scalar* {}_{}_fetch = ",
+                    sampler_sym.name, base_sym.name
+                );
+            }
+            _ => panic!(),
         }
     } else {
         panic!();
-    };
+    }
     write!(
         state,
-        "{} {}_{}_fetch = texelFetchPtr({}, {}, {}, {}, {}, {});\n",
-        ptr_type,
-        sampler_sym.name,
-        base_sym.name,
-        sampler_sym.name,
-        base_sym.name,
-        offsets.min_x,
-        offsets.max_x,
-        offsets.min_y,
-        offsets.max_y,
+        "texelFetchPtr({}, {}, {}, {}, {}, {});\n",
+        sampler_sym.name, base_sym.name, offsets.min_x, offsets.max_x, offsets.min_y, offsets.max_y
     );
 }
 
@@ -2688,64 +2750,27 @@ pub fn show_function_definition(
     }
 
     if state.output_cxx {
-        match fd.prototype.name.as_str() {
-            "swgl_drawSpanRGBA8" |
-            "swgl_drawSpanR8" => {
-                // Partial spans are not drawn using span shaders, but rather drawn with a fragment shader
-                // where the span shader left off. We need to undo any changes to the interpolants made by
-                // the span shaders so that we can reset the interpolants to where the fragment shader
-                // expects them. We do this by saving them in an _Undo_ struct on entry to the span shader,
-                // and then restore them in the _Undo_ struct destructor.
-                let mut needs_undo = vec![];
-                for global in &fd.globals {
-                    let sym = state.hir.sym(*global);
-                    match &sym.decl {
-                        hir::SymDecl::Global(hir::StorageClass::In, _, ty, hir::RunClass::Vector) => {
-                            if needs_undo.is_empty() {
-                                state.write("struct _Undo_ {\nSelf* self;\n");
-                            }
-                            show_type(state, ty);
-                            write!(state, " {};\n", sym.name);
-                            needs_undo.push(sym.name.clone());
-                        }
-                        _ => {}
-                    }
-                }
-                if !needs_undo.is_empty() {
-                    state.write("explicit _Undo_(Self* self) : self(self)");
-                    for name in &needs_undo {
-                        write!(state, ", {0}(self->{0})", name);
-                    }
-                    state.write(" {}\n");
-                    state.write("~_Undo_() {\n");
-                    for name in &needs_undo {
-                        write!(state, "self->{0} = {0};\n", name);
-                    }
-                    state.write("}} _undo_(this);\n");
-                }
-            }
-            _ => {}
-        }
-
         let mut texel_fetches = state.texel_fetches.borrow_mut();
         texel_fetches.clear();
         for ((sampler, base), offsets) in fd.texel_fetches.iter() {
-            add_used_global(state, sampler);
-            let sampler_sym = state.hir.sym(*sampler);
             let base_sym = state.hir.sym(*base);
-            match &base_sym.decl {
-                hir::SymDecl::Global(..) => {
-                    add_used_global(state, base);
-                    define_texel_fetch_ptr(state, &base_sym, &sampler_sym, &offsets);
-                }
-                hir::SymDecl::Local(..) => {
-                    if fd.prototype.has_parameter(*base) {
+            if symbol_run_class(&base_sym.decl, vector_mask) == hir::RunClass::Scalar {
+                add_used_global(state, sampler);
+                let sampler_sym = state.hir.sym(*sampler);
+                match &base_sym.decl {
+                    hir::SymDecl::Global(..) => {
+                        add_used_global(state, base);
                         define_texel_fetch_ptr(state, &base_sym, &sampler_sym, &offsets);
-                    } else {
-                        texel_fetches.push((*sampler, *base, offsets.clone()));
                     }
+                    hir::SymDecl::Local(..) => {
+                        if fd.prototype.has_parameter(*base) {
+                            define_texel_fetch_ptr(state, &base_sym, &sampler_sym, &offsets);
+                        } else {
+                            texel_fetches.push((*sampler, *base, offsets.clone()));
+                        }
+                    }
+                    _ => panic!(),
                 }
-                _ => panic!(),
             }
         }
     }
@@ -3170,7 +3195,7 @@ pub fn show_iteration_statement(state: &mut OutputState, ist: &hir::IterationSta
             show_statement(state, body);
             state.write(" while (");
             show_hir_expr(state, cond);
-            state.write(");\n");
+            state.write(")\n");
         }
         hir::IterationStatement::For(ref init, ref rest, ref body) => {
             state.write("for (");
@@ -3241,7 +3266,7 @@ pub fn show_jump_statement(state: &mut OutputState, j: &hir::JumpStatement) {
             if state.output_cxx {
                 state.uses_discard = true;
                 if let Some(mask) = &state.mask {
-                    state.write("swgl_IsPixelDiscarded |= (");
+                    state.write("isPixelDiscarded |= (");
                     show_hir_expr(state, mask);
                     state.write(")");
                     if state.return_declared {
@@ -3249,7 +3274,7 @@ pub fn show_jump_statement(state: &mut OutputState, j: &hir::JumpStatement) {
                     }
                     state.write(";\n");
                 } else {
-                    state.write("swgl_IsPixelDiscarded = true;\n");
+                    state.write("isPixelDiscarded = true;\n");
                 }
             } else {
                 state.write("discard;\n");
@@ -3554,11 +3579,9 @@ pub fn show_translation_unit(state: &mut OutputState, tu: &hir::TranslationUnit)
         state.flush_buffer();
     }
     if state.output_cxx {
-        for name in &["main", "swgl_drawSpanRGBA8", "swgl_drawSpanR8"] {
-            if let Some(sym) = state.hir.lookup(name) {
-                show_cxx_function_definition(state, sym, 0);
-                state.flush_buffer();
-            }
+        if let Some(name) = state.hir.lookup("main") {
+            show_cxx_function_definition(state, name, 0);
+            state.flush_buffer();
         }
     }
 }
@@ -3568,33 +3591,37 @@ fn write_abi(state: &mut OutputState) {
         ShaderKind::Fragment => {
             state.write("static void run(Self *self) {\n");
             if state.uses_discard {
-                state.write(" self->swgl_IsPixelDiscarded = false;\n");
+                state.write(" self->isPixelDiscarded = false;\n");
             }
             state.write(" self->main();\n");
             state.write(" self->step_interp_inputs();\n");
             state.write("}\n");
-            state.write("static void skip(Self* self, int steps) {\n");
-            state.write(" self->step_interp_inputs(steps);\n");
+            state.write("static void skip(Self* self, int chunks) {\n");
+            state.write(" self->step_interp_inputs();\n");
+            state.write(" while (--chunks > 0) self->step_interp_inputs();\n");
             state.write("}\n");
             if state.use_perspective {
                 state.write("static void run_perspective(Self *self) {\n");
                 if state.uses_discard {
-                    state.write(" self->swgl_IsPixelDiscarded = false;\n");
+                    state.write(" self->isPixelDiscarded = false;\n");
                 }
                 state.write(" self->main();\n");
                 state.write(" self->step_perspective_inputs();\n");
                 state.write("}\n");
-                state.write("static void skip_perspective(Self* self, int steps) {\n");
-                state.write(" self->step_perspective_inputs(steps);\n");
+                state.write("static void skip_perspective(Self* self, int chunks) {\n");
+                state.write(" self->step_perspective_inputs();\n");
+                state.write(" while (--chunks > 0) self->step_perspective_inputs();\n");
                 state.write("}\n");
             }
-            if state.hir.lookup("swgl_drawSpanRGBA8").is_some() {
+            if state.has_draw_span_rgba8 {
                 state.write(
-                    "static int draw_span_RGBA8(Self* self) { DISPATCH_DRAW_SPAN(self, RGBA8); }\n");
+                    "static void draw_span_RGBA8(Self* self, uint32_t* buf, int len) { \
+                        DISPATCH_DRAW_SPAN(self, buf, len); }\n");
             }
-            if state.hir.lookup("swgl_drawSpanR8").is_some() {
+            if state.has_draw_span_r8 {
                 state.write(
-                    "static int draw_span_R8(Self* self) { DISPATCH_DRAW_SPAN(self, R8); }\n");
+                    "static void draw_span_R8(Self* self, uint8_t* buf, int len) { \
+                        DISPATCH_DRAW_SPAN(self, buf, len); }\n");
             }
 
             write!(state, "public:\n{}_frag() {{\n", state.name);
@@ -3616,10 +3643,10 @@ fn write_abi(state: &mut OutputState) {
             state.write(" init_span_func = (InitSpanFunc)&read_interp_inputs;\n");
             state.write(" run_func = (RunFunc)&run;\n");
             state.write(" skip_func = (SkipFunc)&skip;\n");
-            if state.hir.lookup("swgl_drawSpanRGBA8").is_some() {
+            if state.has_draw_span_rgba8 {
                 state.write(" draw_span_RGBA8_func = (DrawSpanRGBA8Func)&draw_span_RGBA8;\n");
             }
-            if state.hir.lookup("swgl_drawSpanR8").is_some() {
+            if state.has_draw_span_r8 {
                 state.write(" draw_span_R8_func = (DrawSpanR8Func)&draw_span_R8;\n");
             }
             if state.uses_discard {
@@ -3643,9 +3670,6 @@ fn write_abi(state: &mut OutputState) {
             state.write(" init_batch_func = (InitBatchFunc)&init_batch;\n");
             state.write(" load_attribs_func = (LoadAttribsFunc)&load_attribs;\n");
             state.write(" run_primitive_func = (RunPrimitiveFunc)&run;\n");
-            if state.hir.used_clip_dist != 0 {
-                state.write(" enable_clip_distance();\n");
-            }
         }
     }
     state.write("}\n");

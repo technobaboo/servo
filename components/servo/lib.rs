@@ -23,6 +23,15 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
+use webrender_api::{DocumentId, FontInstanceKey, FontKey, ImageKey, RenderApiSender};
+
+#[cfg(feature = "webdriver")]
+fn webdriver(port: u16, constellation: Sender<ConstellationMsg>) {
+    webdriver_server::start_server(port, constellation);
+}
+
+#[cfg(not(feature = "webdriver"))]
+fn webdriver(_port: u16, _constellation: Sender<ConstellationMsg>) {}
 
 use bluetooth::BluetoothThreadFactory;
 use bluetooth_traits::BluetoothRequest;
@@ -50,7 +59,7 @@ use constellation::{
 use crossbeam_channel::{unbounded, Sender};
 use embedder_traits::{EmbedderMsg, EmbedderProxy, EmbedderReceiver, EventLoopWaker};
 use env_logger::Builder as EnvLoggerBuilder;
-use euclid::Scale;
+use euclid::{Scale, Size2D};
 #[cfg(all(
     not(target_os = "windows"),
     not(target_os = "ios"),
@@ -77,11 +86,6 @@ use servo_config::{opts, pref, prefs};
 use servo_media::player::context::GlContext;
 use servo_media::ServoMedia;
 use surfman::GLApi;
-use webrender::{RenderApiSender, ShaderPrecacheFlags};
-use webrender_api::{DocumentId, FontInstanceKey, FontKey, ImageKey};
-use webrender_traits::{
-    WebrenderExternalImageHandlers, WebrenderExternalImageRegistry, WebrenderImageHandlerType,
-};
 pub use {
     background_hang_monitor, bluetooth, bluetooth_traits, canvas, canvas_traits, compositing,
     constellation, devtools, devtools_traits, embedder_traits, euclid, gfx, ipc_channel,
@@ -90,14 +94,10 @@ pub use {
     servo_config, servo_geometry, servo_url as url, servo_url, style, style_traits, webgpu,
     webrender_api, webrender_surfman, webrender_traits,
 };
-
-#[cfg(feature = "webdriver")]
-fn webdriver(port: u16, constellation: Sender<ConstellationMsg>) {
-    webdriver_server::start_server(port, constellation);
-}
-
-#[cfg(not(feature = "webdriver"))]
-fn webdriver(_port: u16, _constellation: Sender<ConstellationMsg>) {}
+use webrender::ShaderPrecacheFlags;
+use webrender_traits::WebrenderExternalImageHandlers;
+use webrender_traits::WebrenderExternalImageRegistry;
+use webrender_traits::WebrenderImageHandlerType;
 
 #[cfg(feature = "media-gstreamer")]
 mod media_platform {
@@ -187,11 +187,9 @@ impl webrender_api::RenderNotifier for RenderNotifier {
         Box::new(RenderNotifier::new(self.compositor_proxy.clone()))
     }
 
-    fn wake_up(&self, composite_needed: bool) {
-        if composite_needed {
-            self.compositor_proxy
-                .recomposite(CompositingReason::NewWebRenderFrame);
-        }
+    fn wake_up(&self) {
+        self.compositor_proxy
+            .recomposite(CompositingReason::NewWebRenderFrame);
     }
 
     fn new_frame_ready(
@@ -205,7 +203,7 @@ impl webrender_api::RenderNotifier for RenderNotifier {
             self.compositor_proxy
                 .send(CompositorMsg::NewScrollFrameReady(composite_needed));
         } else {
-            self.wake_up(true);
+            self.wake_up();
         }
     }
 }
@@ -305,7 +303,7 @@ where
             None
         };
 
-        let coordinates: compositing::windowing::EmbedderCoordinates = window.get_coordinates();
+        let coordinates = window.get_coordinates();
         let device_pixel_ratio = coordinates.hidpi_factor.get();
         let viewport_size = coordinates.viewport.size.to_f32() / device_pixel_ratio;
 
@@ -317,6 +315,10 @@ where
             );
 
             let render_notifier = Box::new(RenderNotifier::new(compositor_proxy.clone()));
+
+            // Cast from `DeviceIndependentPixel` to `DevicePixel`
+            let window_size = Size2D::from_untyped(viewport_size.to_i32().to_untyped());
+
             webrender::Renderer::new(
                 webrender_gl.clone(),
                 render_notifier,
@@ -337,12 +339,20 @@ where
                     ..Default::default()
                 },
                 None,
+                window_size,
             )
             .expect("Unable to initialize webrender!")
         };
 
         let webrender_api = webrender_api_sender.create_api();
-        let webrender_document = webrender_api.add_document(coordinates.get_viewport().size);
+        let wr_document_layer = 0; //TODO
+        let webrender_document =
+            webrender_api.add_document(coordinates.framebuffer, wr_document_layer);
+        webrender_api.set_document_view(
+            webrender_document,
+            coordinates.get_viewport(),
+            coordinates.hidpi_factor.get(),
+        );
 
         // Important that this call is done in a single-threaded fashion, we
         // can't defer it after `create_constellation` has started.
@@ -535,9 +545,8 @@ where
                 self.compositor.on_wheel_event(delta, location);
             },
 
-            EmbedderEvent::Scroll(scroll_location, cursor, phase) => {
-                self.compositor
-                    .on_scroll_event(scroll_location, cursor, phase);
+            EmbedderEvent::Scroll(delta, cursor, phase) => {
+                self.compositor.on_scroll_event(delta, cursor, phase);
             },
 
             EmbedderEvent::Zoom(magnification) => {

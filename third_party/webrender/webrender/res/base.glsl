@@ -4,6 +4,12 @@
 
 #if defined(GL_ES)
     #if GL_ES == 1
+        #ifdef GL_FRAGMENT_PRECISION_HIGH
+        precision highp sampler2DArray;
+        #else
+        precision mediump sampler2DArray;
+        #endif
+
         // Sampler default precision is lowp on mobile GPUs.
         // This causes RGBA32F texture data to be clamped to 16 bit floats on some GPUs (e.g. Mali-T880).
         // Define highp precision macro to allow lossless FLOAT texture sampling.
@@ -26,20 +32,7 @@
 #else
     #define HIGHP_SAMPLER_FLOAT
     #define HIGHP_FS_ADDRESS
-    #if defined(PLATFORM_MACOS) && !defined(SWGL)
-        // texelFetchOffset introduces a variety of shader compilation bugs on macOS Intel so avoid it.
-        #define TEXEL_FETCH(sampler, position, lod, offset) texelFetch(sampler, position + offset, lod)
-    #else
-        #define TEXEL_FETCH(sampler, position, lod, offset) texelFetchOffset(sampler, position, lod, offset)
-    #endif
-#endif
-
-#ifdef SWGL
-    #define SWGL_DRAW_SPAN
-    #define SWGL_CLIP_MASK
-    #define SWGL_ANTIALIAS
-    #define SWGL_BLEND
-    #define SWGL_CLIP_DIST
+    #define TEXEL_FETCH(sampler, position, lod, offset) texelFetchOffset(sampler, position, lod, offset)
 #endif
 
 #ifdef WR_VERTEX_SHADER
@@ -51,20 +44,10 @@
         #define PER_INSTANCE
     #endif
 
-    #if __VERSION__ != 100
-        #define varying out
-        #define attribute in
-    #endif
+    #define varying out
 #endif
 
 #ifdef WR_FRAGMENT_SHADER
     precision highp float;
-    #if __VERSION__ != 100
-        #define varying in
-    #endif
-#endif
-
-// Flat interpolation is not supported on ESSL 1
-#if __VERSION__ == 100
-    #define flat
+    #define varying in
 #endif

@@ -57,10 +57,13 @@ use servo_atoms::Atom;
 use servo_url::{ImmutableOrigin, ServoUrl};
 use style_traits::{CSSPixel, SpeculativePainter};
 use webgpu::identity::WebGPUMsg;
-use webrender_api::units::{DeviceIntSize, DevicePixel, LayoutPixel, LayoutPoint, WorldPoint};
+use webrender_api::units::{
+    DeviceIntSize, DevicePixel, LayoutPixel, LayoutPoint, LayoutSize, WorldPoint,
+};
 use webrender_api::{
     BuiltDisplayList, BuiltDisplayListDescriptor, DocumentId, ExternalImageData, ExternalScrollId,
     HitTestFlags, ImageData, ImageDescriptor, ImageKey, PipelineId as WebRenderPipelineId,
+    ScrollClamping,
 };
 
 use crate::compositor::CompositorDisplayListInfo;
@@ -1120,11 +1123,13 @@ pub enum WebrenderMsg {
     /// Inform WebRender of the existence of this pipeline.
     SendInitialTransaction(WebRenderPipelineId),
     /// Perform a scroll operation.
-    SendScrollNode(LayoutPoint, ExternalScrollId),
+    SendScrollNode(LayoutPoint, ExternalScrollId, ScrollClamping),
     /// Inform WebRender of a new display list for the given pipeline.
     SendDisplayList {
         /// The [CompositorDisplayListInfo] that describes the display list being sent.
         display_list_info: CompositorDisplayListInfo,
+        /// The content size of this display list as calculated by WebRender.
+        content_size: LayoutSize,
         /// A descriptor of this display list used to construct this display list from raw data.
         display_list_descriptor: BuiltDisplayListDescriptor,
         /// An [ipc::IpcBytesReceiver] used to send the raw data of the display list.
@@ -1163,8 +1168,16 @@ impl WebrenderIpcSender {
     }
 
     /// Perform a scroll operation.
-    pub fn send_scroll_node(&self, point: LayoutPoint, scroll_id: ExternalScrollId) {
-        if let Err(e) = self.0.send(WebrenderMsg::SendScrollNode(point, scroll_id)) {
+    pub fn send_scroll_node(
+        &self,
+        point: LayoutPoint,
+        scroll_id: ExternalScrollId,
+        clamping: ScrollClamping,
+    ) {
+        if let Err(e) = self
+            .0
+            .send(WebrenderMsg::SendScrollNode(point, scroll_id, clamping))
+        {
             warn!("Error sending scroll node: {}", e);
         }
     }
@@ -1173,12 +1186,13 @@ impl WebrenderIpcSender {
     pub fn send_display_list(
         &self,
         display_list_info: CompositorDisplayListInfo,
-        list: BuiltDisplayList,
+        (_, content_size, list): (WebRenderPipelineId, LayoutSize, BuiltDisplayList),
     ) {
         let (display_list_data, display_list_descriptor) = list.into_data();
         let (display_list_sender, display_list_receiver) = ipc::bytes_channel().unwrap();
         if let Err(e) = self.0.send(WebrenderMsg::SendDisplayList {
             display_list_info,
+            content_size,
             display_list_descriptor,
             display_list_receiver,
         }) {

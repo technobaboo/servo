@@ -20,7 +20,7 @@ use style::values::computed::{BorderStyle, Color, Length, LengthPercentage, Outl
 use style::values::specified::text::TextDecorationLine;
 use style::values::specified::ui::CursorKind;
 use style_traits::CSSPixel;
-use webrender_api::{self as wr, units, ClipChainId, ClipId, CommonItemProperties};
+use webrender_api::{self as wr, units};
 
 use crate::context::LayoutContext;
 use crate::display_list::conversions::ToWebRender;
@@ -73,7 +73,7 @@ impl DisplayList {
         epoch: wr::Epoch,
     ) -> Self {
         Self {
-            wr: wr::DisplayListBuilder::new(pipeline_id),
+            wr: wr::DisplayListBuilder::new(pipeline_id, content_size),
             compositor_info: CompositorDisplayListInfo::new(
                 viewport_size,
                 content_size,
@@ -95,7 +95,7 @@ pub(crate) struct DisplayListBuilder<'a> {
     /// only passing the builder instead passing the containing
     /// [stacking_context::StackingContextFragment] as an argument to display
     /// list building functions.
-    current_clip_chain_id: ClipChainId,
+    current_clip_id: wr::ClipId,
 
     /// The [OpaqueNode] handle to the node used to paint the page background
     /// if the background was a canvas.
@@ -128,8 +128,8 @@ impl DisplayList {
         root_stacking_context: &StackingContext,
     ) -> (FnvHashMap<BrowsingContextId, Size2D<f32, CSSPixel>>, bool) {
         let mut builder = DisplayListBuilder {
-            current_scroll_node_id: self.compositor_info.root_reference_frame_id,
-            current_clip_chain_id: ClipChainId(0, self.compositor_info.pipeline_id),
+            current_scroll_node_id: self.compositor_info.root_scroll_node_id,
+            current_clip_id: wr::ClipId::root(self.wr.pipeline_id),
             element_for_canvas_background: fragment_tree.canvas_background.from_element,
             is_contentful: false,
             context,
@@ -157,7 +157,8 @@ impl<'a> DisplayListBuilder<'a> {
         wr::CommonItemProperties {
             clip_rect,
             spatial_id: self.current_scroll_node_id.spatial_id,
-            clip_id: ClipId::ClipChain(self.current_clip_chain_id),
+            clip_id: self.current_clip_id,
+            hit_info: None,
             flags: style.get_webrender_primitive_flags(),
         }
     }
@@ -282,21 +283,12 @@ impl Fragment {
             return;
         }
 
-        if let Some(hit_info) =
-            builder.hit_info(&fragment.parent_style, fragment.base.tag, Cursor::Text)
-        {
-            let clip_chain_id = builder.current_clip_chain_id;
-            let spatial_id = builder.current_scroll_node_id.spatial_id;
-            builder.wr().push_hit_test(
-                &CommonItemProperties {
-                    clip_rect: rect.to_webrender(),
-                    clip_id: ClipId::ClipChain(clip_chain_id),
-                    spatial_id,
-                    flags: fragment.parent_style.get_webrender_primitive_flags(),
-                },
-                hit_info,
-            );
-        }
+        let common = builder.common_properties(rect.to_webrender(), &fragment.parent_style);
+
+        let hit_info = builder.hit_info(&fragment.parent_style, fragment.base.tag, Cursor::Text);
+        let mut hit_test_common = common.clone();
+        hit_test_common.hit_info = hit_info;
+        builder.wr().push_hit_test(&hit_test_common);
 
         let color = fragment.parent_style.clone_color();
         let font_metrics = &fragment.font_metrics;
@@ -328,7 +320,6 @@ impl Fragment {
         }
 
         // Text.
-        let common = builder.common_properties(rect.to_webrender(), &fragment.parent_style);
         builder.wr().push_text(
             &common,
             rect.to_webrender(),
@@ -387,9 +378,9 @@ struct BuilderForBoxFragment<'a> {
     padding_rect: OnceCell<units::LayoutRect>,
     content_rect: OnceCell<units::LayoutRect>,
     border_radius: wr::BorderRadius,
-    border_edge_clip_chain_id: OnceCell<Option<ClipChainId>>,
-    padding_edge_clip_chain_id: OnceCell<Option<ClipChainId>>,
-    content_edge_clip_chain_id: OnceCell<Option<ClipChainId>>,
+    border_edge_clip_id: OnceCell<Option<wr::ClipId>>,
+    padding_edge_clip_id: OnceCell<Option<wr::ClipId>>,
+    content_edge_clip_id: OnceCell<Option<wr::ClipId>>,
 }
 
 impl<'a> BuilderForBoxFragment<'a> {
@@ -444,9 +435,9 @@ impl<'a> BuilderForBoxFragment<'a> {
             border_radius,
             padding_rect: OnceCell::new(),
             content_rect: OnceCell::new(),
-            border_edge_clip_chain_id: OnceCell::new(),
-            padding_edge_clip_chain_id: OnceCell::new(),
-            content_edge_clip_chain_id: OnceCell::new(),
+            border_edge_clip_id: OnceCell::new(),
+            padding_edge_clip_id: OnceCell::new(),
+            content_edge_clip_id: OnceCell::new(),
         }
     }
 
@@ -470,14 +461,14 @@ impl<'a> BuilderForBoxFragment<'a> {
         })
     }
 
-    fn border_edge_clip(&self, builder: &mut DisplayListBuilder) -> Option<ClipChainId> {
+    fn border_edge_clip(&self, builder: &mut DisplayListBuilder) -> Option<wr::ClipId> {
         *self
-            .border_edge_clip_chain_id
+            .border_edge_clip_id
             .get_or_init(|| clip_for_radii(self.border_radius, self.border_rect, builder))
     }
 
-    fn padding_edge_clip(&self, builder: &mut DisplayListBuilder) -> Option<ClipChainId> {
-        *self.padding_edge_clip_chain_id.get_or_init(|| {
+    fn padding_edge_clip(&self, builder: &mut DisplayListBuilder) -> Option<wr::ClipId> {
+        *self.padding_edge_clip_id.get_or_init(|| {
             clip_for_radii(
                 inner_radii(
                     self.border_radius,
@@ -492,8 +483,8 @@ impl<'a> BuilderForBoxFragment<'a> {
         })
     }
 
-    fn content_edge_clip(&self, builder: &mut DisplayListBuilder) -> Option<ClipChainId> {
-        *self.content_edge_clip_chain_id.get_or_init(|| {
+    fn content_edge_clip(&self, builder: &mut DisplayListBuilder) -> Option<wr::ClipId> {
+        *self.content_edge_clip_id.get_or_init(|| {
             clip_for_radii(
                 inner_radii(
                     self.border_radius,
@@ -523,16 +514,14 @@ impl<'a> BuilderForBoxFragment<'a> {
             self.fragment.base.tag,
             Cursor::Default,
         );
-        let hit_info = match hit_info {
-            Some(hit_info) => hit_info,
-            None => return,
-        };
-
-        let mut common = builder.common_properties(self.border_rect, &self.fragment.style);
-        if let Some(clip_chain_id) = self.border_edge_clip(builder) {
-            common.clip_id = ClipId::ClipChain(clip_chain_id);
+        if hit_info.is_some() {
+            let mut common = builder.common_properties(self.border_rect, &self.fragment.style);
+            common.hit_info = hit_info;
+            if let Some(clip_id) = self.border_edge_clip(builder) {
+                common.clip_id = clip_id
+            }
+            builder.wr().push_hit_test(&common)
         }
-        builder.wr().push_hit_test(&common, hit_info);
     }
 
     fn build_background(&mut self, builder: &mut DisplayListBuilder) {
@@ -881,27 +870,21 @@ fn clip_for_radii(
     radii: wr::BorderRadius,
     rect: units::LayoutRect,
     builder: &mut DisplayListBuilder,
-) -> Option<ClipChainId> {
+) -> Option<wr::ClipId> {
     if radii.is_zero() {
         None
     } else {
-        let clip_chain_id = builder.current_clip_chain_id.clone();
         let parent_space_and_clip = wr::SpaceAndClipInfo {
             spatial_id: builder.current_scroll_node_id.spatial_id,
-            clip_id: ClipId::ClipChain(clip_chain_id),
+            clip_id: builder.current_clip_id,
         };
-        let new_clip_id = builder.wr().define_clip_rounded_rect(
+        Some(builder.wr().define_clip_rounded_rect(
             &parent_space_and_clip,
             wr::ComplexClipRegion {
                 rect,
                 radii,
                 mode: wr::ClipMode::Clip,
             },
-        );
-        Some(
-            builder
-                .wr()
-                .define_clip_chain(Some(clip_chain_id), [new_clip_id]),
-        )
+        ))
     }
 }

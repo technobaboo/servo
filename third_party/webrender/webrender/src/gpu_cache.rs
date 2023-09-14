@@ -27,15 +27,13 @@
 use api::{DebugFlags, DocumentId, PremultipliedColorF};
 #[cfg(test)]
 use api::IdNamespace;
-use api::units::*;
+use api::units::TexelRect;
 use euclid::{HomogeneousVector, Rect};
 use crate::internal_types::{FastHashMap, FastHashSet};
-use crate::profiler::{self, TransactionProfile};
+use crate::profiler::GpuCacheProfileCounters;
 use crate::render_backend::{FrameStamp, FrameId};
-use crate::prim_store::VECS_PER_SEGMENT;
 use crate::renderer::MAX_VERTEX_TEXTURE_WIDTH;
-use crate::util::VecHelper;
-use std::{u16, u32};
+use std::{mem, u16, u32};
 use std::num::NonZeroU32;
 use std::ops::Add;
 use std::time::{Duration, Instant};
@@ -139,6 +137,13 @@ impl From<TexelRect> for GpuBlockData {
 }
 
 
+// Any data type that can be stored in the GPU cache should
+// implement this trait.
+pub trait ToGpuBlocks {
+    // Request an arbitrary number of GPU data blocks.
+    fn write_gpu_blocks(&self, _: GpuDataRequest);
+}
+
 // A handle to a GPU resource.
 #[derive(Debug, Copy, Clone, MallocSizeOf)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
@@ -150,10 +155,6 @@ pub struct GpuCacheHandle {
 impl GpuCacheHandle {
     pub fn new() -> Self {
         GpuCacheHandle { location: None }
-    }
-
-    pub fn as_int(self, gpu_cache: &GpuCache) -> i32 {
-        gpu_cache.get_address(&self).as_int()
     }
 }
 
@@ -180,13 +181,6 @@ impl GpuCacheAddress {
         u: u16::MAX,
         v: u16::MAX,
     };
-
-    pub fn as_int(self) -> i32 {
-        // TODO(gw): Temporarily encode GPU Cache addresses as a single int.
-        //           In the future, we can change the PrimitiveInstanceData struct
-        //           to use 2x u16 for the vertex attribute instead of an i32.
-        self.v as i32 * MAX_VERTEX_TEXTURE_WIDTH as i32 + self.u as i32
-    }
 }
 
 impl Add<usize> for GpuCacheAddress {
@@ -648,9 +642,6 @@ impl Texture {
 /// works as a container that can only grow.
 #[must_use]
 pub struct GpuDataRequest<'a> {
-    //TODO: remove this, see
-    // https://bugzilla.mozilla.org/show_bug.cgi?id=1690546
-    #[allow(dead_code)]
     handle: &'a mut GpuCacheHandle,
     frame_stamp: FrameStamp,
     start_index: usize,
@@ -664,17 +655,6 @@ impl<'a> GpuDataRequest<'a> {
         B: Into<GpuBlockData>,
     {
         self.texture.pending_blocks.push(block.into());
-    }
-
-    // Write the GPU cache data for an individual segment.
-    pub fn write_segment(
-        &mut self,
-        local_rect: LayoutRect,
-        extra_data: [f32; 4],
-    ) {
-        let _ = VECS_PER_SEGMENT;
-        self.push(local_rect);
-        self.push(extra_data);
     }
 
     pub fn current_used_block_num(&self) -> usize {
@@ -868,12 +848,18 @@ impl GpuCache {
     /// device specific cache texture.
     pub fn end_frame(
         &mut self,
-        profile: &mut TransactionProfile,
+        profile_counters: &mut GpuCacheProfileCounters,
     ) -> FrameStamp {
         profile_scope!("end_frame");
-        profile.set(profiler::GPU_CACHE_ROWS_TOTAL, self.texture.rows.len());
-        profile.set(profiler::GPU_CACHE_BLOCKS_TOTAL, self.texture.allocated_block_count);
-        profile.set(profiler::GPU_CACHE_BLOCKS_SAVED, self.saved_block_count);
+        profile_counters
+            .allocated_rows
+            .set(self.texture.rows.len());
+        profile_counters
+            .allocated_blocks
+            .set(self.texture.allocated_block_count);
+        profile_counters
+            .saved_blocks
+            .set(self.saved_block_count);
 
         let reached_threshold =
             self.texture.rows.len() > (GPU_CACHE_INITIAL_HEIGHT as usize) &&
@@ -903,9 +889,9 @@ impl GpuCache {
             frame_id: self.now.frame_id(),
             clear,
             height: self.texture.height,
-            debug_commands: self.texture.debug_commands.take_and_preallocate(),
-            updates: self.texture.updates.take_and_preallocate(),
-            blocks: self.texture.pending_blocks.take_and_preallocate(),
+            debug_commands: mem::replace(&mut self.texture.debug_commands, Vec::new()),
+            updates: mem::replace(&mut self.texture.updates, Vec::new()),
+            blocks: mem::replace(&mut self.texture.pending_blocks, Vec::new()),
         }
     }
 

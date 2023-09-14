@@ -43,7 +43,10 @@ fn get_discriminant_size_type(len: usize) -> TokenStream {
 
 fn is_struct(s: &Structure) -> bool {
     // a single variant with no prefix is 'struct'
-    matches!(&s.variants()[..], [v] if v.prefix.is_none())
+    match &s.variants()[..] {
+        [v] if v.prefix.is_none() => true,
+        _ => false,
+    }
 }
 
 fn derive_max_size(s: &Structure) -> TokenStream {
@@ -220,7 +223,7 @@ fn peek_poke_derive(mut s: Structure) -> TokenStream {
     };
 
     let poke_impl = s.gen_impl(quote! {
-        extern crate peek_poke;
+        use peek_poke;
 
         gen unsafe impl peek_poke::Poke for @Self {
             #max_size_fn
@@ -246,7 +249,7 @@ fn peek_poke_derive(mut s: Structure) -> TokenStream {
     let peek_impl = quote! {
         #[allow(non_upper_case_globals)]
         const #dummy_const: () = {
-            extern crate peek_poke;
+            use peek_poke;
 
             impl #impl_generics peek_poke::Peek for #name #ty_generics #where_clause {
                 #peek_from_fn

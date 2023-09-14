@@ -15,9 +15,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::usize;
 use webrender::api::*;
-use webrender::render_api::*;
 use webrender::api::units::*;
-use webrender::api::FillRule;
 use crate::wrench::{FontDescriptor, Wrench, WrenchThing};
 use crate::yaml_helper::{StringEnum, YamlHelper, make_perspective};
 use yaml_rust::{Yaml, YamlLoader};
@@ -106,7 +104,7 @@ impl LocalExternalImageHandler {
     pub fn add_image(&mut self,
         device: &webrender::Device,
         desc: ImageDescriptor,
-        target: ImageBufferKind,
+        target: TextureTarget,
         image_data: ImageData,
     ) -> ImageData {
         let (image_id, channel_idx) = match image_data {
@@ -236,13 +234,8 @@ fn generate_checkerboard_image(
         }
     }
 
-    let flags = match kind {
-        CheckerboardKind::BlackGrey => ImageDescriptorFlags::IS_OPAQUE,
-        CheckerboardKind::BlackTransparent => ImageDescriptorFlags::empty(),
-    };
-
     (
-        ImageDescriptor::new(width as i32, height as i32, ImageFormat::BGRA8, flags),
+        ImageDescriptor::new(width as i32, height as i32, ImageFormat::BGRA8, ImageDescriptorFlags::IS_OPAQUE),
         ImageData::new(pixels),
     )
 }
@@ -329,7 +322,7 @@ pub struct YamlFrameReader {
     aux_dir: PathBuf,
     frame_count: u32,
 
-    display_lists: Vec<(PipelineId, BuiltDisplayList)>,
+    display_lists: Vec<(PipelineId, LayoutSize, BuiltDisplayList)>,
 
     include_only: Vec<String>,
 
@@ -339,7 +332,6 @@ pub struct YamlFrameReader {
     /// A HashMap of offsets which specify what scroll offsets particular
     /// scroll layers should be initialized with.
     scroll_offsets: HashMap<ExternalScrollId, LayoutPoint>,
-    next_external_scroll_id: u64,
 
     image_map: HashMap<(PathBuf, Option<i64>), (ImageKey, LayoutSize)>,
 
@@ -390,7 +382,6 @@ impl YamlFrameReader {
             built_frame: usize::MAX,
             keyframes: None,
             external_image_handler: Some(Box::new(LocalExternalImageHandler::new())),
-            next_external_scroll_id: 1000,      // arbitrary to easily see in logs which are implicit
         }
     }
 
@@ -485,12 +476,14 @@ impl YamlFrameReader {
         self.spatial_id_stack.clear();
         self.spatial_id_stack.push(SpatialId::root_scroll_node(pipeline_id));
 
-        let mut builder = DisplayListBuilder::new(pipeline_id);
+        let content_size = self.get_root_size_from_yaml(wrench, yaml);
+        let mut builder = DisplayListBuilder::new(pipeline_id, content_size);
         let mut info = CommonItemProperties {
             clip_rect: LayoutRect::zero(),
             clip_id: ClipId::invalid(),
             spatial_id: SpatialId::new(0, PipelineId::dummy()),
             flags: PrimitiveFlags::default(),
+            hit_info: None,
         };
         self.add_stacking_context_from_yaml(&mut builder, wrench, yaml, true, &mut info);
         self.display_lists.push(builder.finalize());
@@ -762,12 +755,13 @@ impl YamlFrameReader {
             // ensure it gets created as such
             let external_target = match item["external-target"].as_str() {
                 Some(ref s) => match &s[..] {
-                    "2d" => ImageBufferKind::Texture2D,
-                    "rect" => ImageBufferKind::TextureRect,
+                    "2d" => TextureTarget::Default,
+                    "array" => TextureTarget::Array,
+                    "rect" => TextureTarget::Rect,
                     _ => panic!("Unsupported external texture target."),
                 }
                 None => {
-                    ImageBufferKind::Texture2D
+                    TextureTarget::Default
                 }
             };
 
@@ -1004,12 +998,7 @@ impl YamlFrameReader {
             &info.clip_rect
         );
 
-        if let Some(tag) = self.to_hit_testing_tag(&item["hit-testing-tag"]) {
-            dl.push_hit_test(
-                &info,
-                tag,
-            );
-        }
+        dl.push_hit_test(&info);
     }
 
     fn handle_line(
@@ -1754,6 +1743,7 @@ impl YamlFrameReader {
                 clip_rect,
                 clip_id: space_and_clip.clip_id,
                 spatial_id: space_and_clip.spatial_id,
+                hit_info: self.to_hit_testing_tag(&item["hit-testing-tag"]),
                 flags,
             };
 
@@ -1812,12 +1802,11 @@ impl YamlFrameReader {
 
         let numeric_id = yaml["id"].as_i64().map(|id| id as u64);
 
-        let external_id = ExternalScrollId(self.next_external_scroll_id, dl.pipeline_id);
-        self.next_external_scroll_id += 1;
-
-        if let Some(size) = yaml["scroll-offset"].as_point() {
-            self.scroll_offsets.insert(external_id, LayoutPoint::new(size.x, size.y));
-        }
+        let external_id =  yaml["scroll-offset"].as_point().map(|size| {
+            let id = ExternalScrollId((self.scroll_offsets.len() + 1) as u64, dl.pipeline_id);
+            self.scroll_offsets.insert(id, LayoutPoint::new(size.x, size.y));
+            id
+        });
 
         let space_and_clip = dl.define_scroll_frame(
             &self.top_space_and_clip(),
@@ -1983,8 +1972,6 @@ impl YamlFrameReader {
             space_and_clip.clip_id = dl.define_clip_image_mask(
                 &space_and_clip,
                 image_mask,
-                &vec![],
-                FillRule::Nonzero,
             );
         }
 
@@ -2005,6 +1992,13 @@ impl YamlFrameReader {
             self.add_display_list_items_from_yaml(dl, wrench, &yaml["items"]);
             self.clip_id_stack.pop().unwrap();
         }
+    }
+
+    fn get_root_size_from_yaml(&mut self, wrench: &mut Wrench, yaml: &Yaml) -> LayoutSize {
+        yaml["bounds"]
+            .as_rect()
+            .map(|rect| rect.size)
+            .unwrap_or(wrench.window_size_f32())
     }
 
     fn push_reference_frame(
@@ -2041,10 +2035,7 @@ impl YamlFrameReader {
         let reference_frame_kind = if !yaml["perspective"].is_badvalue() {
             ReferenceFrameKind::Perspective { scrolling_relative_to: None }
         } else {
-            ReferenceFrameKind::Transform {
-                is_2d_scale_translation: false,
-                should_snap: false,
-            }
+            ReferenceFrameKind::Transform
         };
 
         let transform = yaml["transform"]
@@ -2201,8 +2192,7 @@ impl WrenchThing for YamlFrameReader {
 
         // If YAML isn't read yet, or watching source file, reload from disk.
         if self.yaml_string.is_empty() || self.watch_source {
-            let mut file = File::open(&self.yaml_path)
-                .unwrap_or_else(|_| panic!("YAML '{:?}' doesn't exist", self.yaml_path));
+            let mut file = File::open(&self.yaml_path).unwrap();
             self.yaml_string.clear();
             file.read_to_string(&mut self.yaml_string).unwrap();
             should_build_yaml = true;

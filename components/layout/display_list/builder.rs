@@ -46,11 +46,10 @@ use style::values::specified::ui::CursorKind;
 use style::values::RGBA;
 use style_traits::{CSSPixel, ToCss};
 use webrender_api::units::{LayoutRect, LayoutTransform, LayoutVector2D};
-use webrender_api::{
-    self, BorderDetails, BorderRadius, BorderSide, BoxShadowClipMode, ColorF, ColorU,
-    ExternalScrollId, FilterOp, GlyphInstance, ImageRendering, LineStyle, NinePatchBorder,
-    NinePatchBorderSource, NormalBorder, PropertyBinding, ScrollSensitivity, StickyOffsetBounds,
-};
+use webrender_api::{self, BorderDetails, BorderRadius, BorderSide, BoxShadowClipMode, ColorF};
+use webrender_api::{ColorU, ExternalScrollId, FilterOp, GlyphInstance, ImageRendering, LineStyle};
+use webrender_api::{NinePatchBorder, NinePatchBorderSource, NormalBorder, PropertyBinding};
+use webrender_api::{ScrollSensitivity, StickyOffsetBounds};
 
 use crate::block::BlockFlow;
 use crate::context::LayoutContext;
@@ -2113,7 +2112,7 @@ impl Fragment {
         }
 
         // Text
-        let (largest_advance, mut glyphs) = convert_text_run_to_glyphs(
+        let mut glyphs = convert_text_run_to_glyphs(
             text_fragment.run.clone(),
             text_fragment.range,
             baseline_origin,
@@ -2127,22 +2126,6 @@ impl Fragment {
         };
         state.indexable_text.insert(self.node, indexable_text);
 
-        // FIXME(mrobinson, #30313): This is a serious hack to enable a WebRender upgrade.
-        // Servo is not calculating glyph boundaries and is instead relying on the
-        // measured size of the content box here -- which is based on the positioning
-        // of the text. The issue is that glyphs can extend beyond the boundaries
-        // established by their brush origin and advance. Servo should be measuring
-        // the ink boundary rectangle based on the brush origin and the glyph extents
-        // instead.
-        //
-        // We don't yet have that information here, so in the meantime simply expand
-        // the boundary rectangle of the text by the largest character advance of the
-        // painted text run in all directions. This is used as a heuristic for a
-        // reasonable amount of "fudge" space to include the entire text run.
-        let inflated_bounds = stacking_relative_content_box
-            .inflate(largest_advance, largest_advance)
-            .to_layout();
-
         // Process glyphs in chunks to avoid overflowing WebRender's internal limits (#17230).
         while !glyphs.is_empty() {
             let mut rest_of_glyphs = vec![];
@@ -2154,7 +2137,7 @@ impl Fragment {
             state.add_display_item(DisplayItem::Text(CommonDisplayItem::with_data(
                 base.clone(),
                 webrender_api::TextDisplayItem {
-                    bounds: inflated_bounds,
+                    bounds: stacking_relative_content_box.to_layout(),
                     common: items::empty_common_item_properties(),
                     font_key: text_fragment.run.font_key,
                     color: text_color.to_layout(),
@@ -3025,8 +3008,7 @@ fn convert_text_run_to_glyphs(
     text_run: Arc<TextRun>,
     range: Range<ByteIndex>,
     mut origin: Point2D<Au>,
-) -> (Au, Vec<GlyphInstance>) {
-    let mut largest_advance = Au(0);
+) -> Vec<GlyphInstance> {
     let mut glyphs = vec![];
 
     for slice in text_run.natural_word_slices_in_visual_order(&range) {
@@ -3036,8 +3018,6 @@ fn convert_text_run_to_glyphs(
             } else {
                 glyph.advance()
             };
-            largest_advance = largest_advance.max(glyph.advance());
-
             if !slice.glyphs.is_whitespace() {
                 let glyph_offset = glyph.offset().unwrap_or(Point2D::zero());
                 let point = origin + glyph_offset.to_vector();
@@ -3050,7 +3030,7 @@ fn convert_text_run_to_glyphs(
             origin.x += glyph_advance;
         }
     }
-    (largest_advance, glyphs)
+    return glyphs;
 }
 
 pub struct IndexableTextItem {

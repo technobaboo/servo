@@ -32,7 +32,6 @@ pub type DeviceIntLength = Length<i32, DevicePixel>;
 pub type DeviceIntSideOffsets = SideOffsets2D<i32, DevicePixel>;
 
 pub type DeviceRect = Rect<f32, DevicePixel>;
-pub type DeviceBox2D = Box2D<f32, DevicePixel>;
 pub type DevicePoint = Point2D<f32, DevicePixel>;
 pub type DeviceVector2D = Vector2D<f32, DevicePixel>;
 pub type DeviceSize = Size2D<f32, DevicePixel>;
@@ -150,7 +149,7 @@ pub type BlobToDeviceTranslation = Translation2D<i32, LayoutPixel, DevicePixel>;
 /// may grow. Storing them as texel coords and normalizing
 /// the UVs in the vertex shader means nothing needs to be
 /// updated on the CPU when the texture size changes.
-#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 pub struct TexelRect {
     pub uv0: DevicePoint,
     pub uv1: DevicePoint,

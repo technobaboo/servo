@@ -26,8 +26,10 @@ use msg::constellation_msg::PipelineId;
 use serde::{Deserialize, Serialize};
 use servo_config::pref;
 use smallvec::SmallVec;
-use webrender::{RenderApi, RenderApiSender, Transaction};
-use webrender_api::{DirtyRect, DocumentId, ExternalImageId, ImageData, ImageDescriptor, ImageKey};
+use webrender_api::{
+    DirtyRect, DocumentId, ExternalImageId, ImageData, ImageDescriptor, ImageKey, RenderApi,
+    RenderApiSender, Transaction,
+};
 use webrender_traits::{
     WebrenderExternalImageApi, WebrenderExternalImageRegistry, WebrenderImageHandlerType,
     WebrenderImageSource,

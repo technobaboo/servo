@@ -44,7 +44,6 @@ impl Epoch {
 
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
-#[derive(MallocSizeOf)]
 pub struct FreeListHandle<M> {
     index: u32,
     epoch: Epoch,
@@ -132,7 +131,7 @@ impl<M> WeakFreeListHandle<M> {
     }
 }
 
-#[derive(Debug, MallocSizeOf)]
+#[derive(Debug)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 struct Slot<T> {
@@ -141,7 +140,7 @@ struct Slot<T> {
     value: Option<T>,
 }
 
-#[derive(Debug, MallocSizeOf)]
+#[derive(Debug)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct FreeList<T, M> {

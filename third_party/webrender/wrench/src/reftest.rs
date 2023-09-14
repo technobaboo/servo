@@ -19,7 +19,6 @@ use std::process::Command;
 use std::sync::mpsc::Receiver;
 use webrender::RenderResults;
 use webrender::api::*;
-use webrender::render_api::*;
 use webrender::api::units::*;
 use crate::wrench::{Wrench, WrenchThing};
 use crate::yaml_frame_reader::YamlFrameReader;
@@ -77,6 +76,9 @@ enum ExtraCheck {
     DrawCalls(usize),
     AlphaTargets(usize),
     ColorTargets(usize),
+    /// Checks the dirty region when rendering the test at |index| in the
+    /// sequence, and compares its serialization to |region|.
+    DirtyRegion { index: usize, region: String },
 }
 
 impl ExtraCheck {
@@ -88,6 +90,9 @@ impl ExtraCheck {
                 x == results.last().unwrap().stats.alpha_target_count,
             ExtraCheck::ColorTargets(x) =>
                 x == results.last().unwrap().stats.color_target_count,
+            ExtraCheck::DirtyRegion { index, ref region } => {
+                *region == format!("{}", results[index].recorded_dirty_regions[0])
+            }
         }
     }
 }
@@ -367,6 +372,7 @@ impl ReftestManifest {
             let mut disable_dual_source_blending = false;
             let mut zoom_factor = 1.0;
             let mut allow_mipmaps = false;
+            let mut dirty_region_index = 0;
             let mut force_subpixel_aa_where_possible = None;
 
             let mut parse_command = |token: &str| -> bool {
@@ -428,6 +434,15 @@ impl ReftestManifest {
                     function if function.starts_with("color_targets(") => {
                         let (_, args, _) = parse_function(function);
                         extra_checks.push(ExtraCheck::ColorTargets(args[0].parse().unwrap()));
+                    }
+                    function if function.starts_with("dirty(") => {
+                        let (_, args, _) = parse_function(function);
+                        let region: String = args[0].parse().unwrap();
+                        extra_checks.push(ExtraCheck::DirtyRegion {
+                            index: dirty_region_index,
+                            region,
+                        });
+                        dirty_region_index += 1;
                     }
                     options if options.starts_with("options(") => {
                         let (_, args, _) = parse_function(options);
@@ -497,7 +512,7 @@ impl ReftestManifest {
             let op = match op {
                 Some(op) => op,
                 None => {
-                    assert!(paths.is_empty(), "paths = {:?}", paths);
+                    assert!(paths.is_empty(), format!("paths = {:?}", paths));
                     continue;
                 }
             };
@@ -508,14 +523,6 @@ impl ReftestManifest {
             // invalidation.
             let reference = paths.pop().unwrap();
             let test = paths;
-
-            if environment.platform == "android" {
-                // Add some fuzz on mobile as we do for non-wrench reftests.
-                // First remove the ranges with difference <= 2, otherwise they might cause the
-                // test to fail before the new range is picked up.
-                fuzziness.retain(|fuzzy| fuzzy.max_difference > 2);
-                fuzziness.push(RefTestFuzzy { max_difference: 2, num_differences: std::usize::MAX });
-            }
 
             // to avoid changing the meaning of existing tests, the case of
             // only a single (or no) 'fuzzy' keyword means we use the max
@@ -739,9 +746,7 @@ impl<'a> ReftestHarness<'a> {
     }
 
     fn run_reftest(&mut self, t: &Reftest) -> bool {
-        let test_name = t.to_string();
-        println!("REFTEST {}", test_name);
-        profile_scope!("wrench reftest", text: &test_name);
+        println!("REFTEST {}", t);
 
         self.wrench
             .api
@@ -838,14 +843,7 @@ impl<'a> ReftestHarness<'a> {
         }
 
         let reference = match reference_image {
-            Some(image) => {
-                let save_all_png = false; // flip to true to update all the tests!
-                if save_all_png {
-                    let img = images.last().unwrap();
-                    save_flipped(&t.reference, img.data.clone(), img.size);
-                }
-                image
-            }
+            Some(image) => image,
             None => {
                 let output = self.render_yaml(
                     &t.reference,
@@ -970,7 +968,7 @@ impl<'a> ReftestHarness<'a> {
         assert!(
             size.width <= window_size.width &&
             size.height <= window_size.height,
-            "size={:?} ws={:?}", size, window_size
+            format!("size={:?} ws={:?}", size, window_size)
         );
 
         // taking the bottom left sub-rectangle

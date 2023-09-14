@@ -2,13 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{NormalBorder, PremultipliedColorF, Shadow, RasterSpace};
+use api::{NormalBorder, PremultipliedColorF, Shadow};
 use api::units::*;
 use crate::border::create_border_segments;
 use crate::border::NormalBorderAu;
 use crate::scene_building::{CreateShadow, IsVisible};
 use crate::frame_builder::{FrameBuildingState};
-use crate::gpu_cache::GpuDataRequest;
+use crate::gpu_cache::{GpuCache, GpuDataRequest};
 use crate::intern;
 use crate::internal_types::LayoutPrimitiveInfo;
 use crate::prim_store::{
@@ -17,12 +17,8 @@ use crate::prim_store::{
     PrimitiveInstanceKind, PrimitiveOpacity,
     PrimitiveStore, InternablePrimitive,
 };
-use crate::resource_cache::ImageRequest;
-use crate::render_task::RenderTask;
-use crate::render_task_graph::RenderTaskId;
-use crate::render_backend::FrameId;
-
-use super::storage;
+use crate::resource_cache::{ImageRequest, ResourceCache};
+use crate::storage;
 
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
@@ -149,7 +145,6 @@ impl intern::Internable for NormalBorderPrim {
     type Key = NormalBorderKey;
     type StoreData = NormalBorderTemplate;
     type InternData = ();
-    const PROFILE_COUNTER: usize = crate::profiler::INTERNED_NORMAL_BORDERS;
 }
 
 impl InternablePrimitive for NormalBorderPrim {
@@ -171,18 +166,13 @@ impl InternablePrimitive for NormalBorderPrim {
     ) -> PrimitiveInstanceKind {
         PrimitiveInstanceKind::NormalBorder {
             data_handle,
-            render_task_ids: storage::Range::empty(),
+            cache_handles: storage::Range::empty(),
         }
     }
 }
 
 impl CreateShadow for NormalBorderPrim {
-    fn create_shadow(
-        &self,
-        shadow: &Shadow,
-        _: bool,
-        _: RasterSpace,
-    ) -> Self {
+    fn create_shadow(&self, shadow: &Shadow) -> Self {
         let border = self.border.with_color(shadow.color.into());
         NormalBorderPrim {
             border,
@@ -232,9 +222,6 @@ pub struct ImageBorderData {
     #[ignore_malloc_size_of = "Arc"]
     pub request: ImageRequest,
     pub brush_segments: Vec<BrushSegment>,
-    pub src_color: Option<RenderTaskId>,
-    pub frame_id: FrameId,
-    pub is_opaque: bool,
 }
 
 impl ImageBorderData {
@@ -252,31 +239,28 @@ impl ImageBorderData {
             self.write_segment_gpu_blocks(request);
         }
 
-        let frame_id = frame_state.rg_builder.frame_id();
-        if self.frame_id != frame_id {
-            self.frame_id = frame_id;
+        let image_properties = frame_state
+            .resource_cache
+            .get_image_properties(self.request.key);
 
-            let size = frame_state.resource_cache.request_image(
-                self.request,
-                frame_state.gpu_cache,
-            );
-
-            let task_id = frame_state.rg_builder.add().init(
-                RenderTask::new_image(size, self.request)
-            );
-
-            self.src_color = Some(task_id);
-
-            let image_properties = frame_state
-                .resource_cache
-                .get_image_properties(self.request.key);
-
-            self.is_opaque = image_properties
-                .map(|properties| properties.descriptor.is_opaque())
-                .unwrap_or(true);
+        common.opacity = if let Some(image_properties) = image_properties {
+            PrimitiveOpacity {
+                is_opaque: image_properties.descriptor.is_opaque(),
+            }
+        } else {
+            PrimitiveOpacity::opaque()
         }
+    }
 
-        common.opacity = PrimitiveOpacity { is_opaque: self.is_opaque };
+    pub fn request_resources(
+        &mut self,
+        resource_cache: &mut ResourceCache,
+        gpu_cache: &mut GpuCache,
+    ) {
+        resource_cache.request_image(
+            self.request,
+            gpu_cache,
+        );
     }
 
     fn write_prim_gpu_blocks(
@@ -323,9 +307,6 @@ impl From<ImageBorderKey> for ImageBorderTemplate {
             kind: ImageBorderData {
                 request: key.kind.request,
                 brush_segments,
-                src_color: None,
-                frame_id: FrameId::INVALID,
-                is_opaque: false,
             }
         }
     }
@@ -337,7 +318,6 @@ impl intern::Internable for ImageBorder {
     type Key = ImageBorderKey;
     type StoreData = ImageBorderTemplate;
     type InternData = ();
-    const PROFILE_COUNTER: usize = crate::profiler::INTERNED_IMAGE_BORDERS;
 }
 
 impl InternablePrimitive for ImageBorder {
@@ -383,6 +363,6 @@ fn test_struct_sizes() {
     assert_eq!(mem::size_of::<NormalBorderTemplate>(), 216, "NormalBorderTemplate size changed");
     assert_eq!(mem::size_of::<NormalBorderKey>(), 104, "NormalBorderKey size changed");
     assert_eq!(mem::size_of::<ImageBorder>(), 84, "ImageBorder size changed");
-    assert_eq!(mem::size_of::<ImageBorderTemplate>(), 96, "ImageBorderTemplate size changed");
+    assert_eq!(mem::size_of::<ImageBorderTemplate>(), 80, "ImageBorderTemplate size changed");
     assert_eq!(mem::size_of::<ImageBorderKey>(), 104, "ImageBorderKey size changed");
 }

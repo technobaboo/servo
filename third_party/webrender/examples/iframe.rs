@@ -2,17 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-extern crate gleam;
-extern crate glutin;
-extern crate webrender;
-extern crate winit;
+use gleam;
+use glutin;
+use webrender;
+use winit;
 
 #[path = "common/boilerplate.rs"]
 mod boilerplate;
 
 use crate::boilerplate::{Example, HandyDandyRectBuilder};
 use webrender::api::*;
-use webrender::render_api::*;
 use webrender::api::units::*;
 
 // This example uses the push_iframe API to nest a second pipeline's displaylist
@@ -36,7 +35,7 @@ impl Example for App {
         let sub_bounds = (0, 0).to(sub_size.width as i32, sub_size.height as i32);
 
         let sub_pipeline_id = PipelineId(pipeline_id.0, 42);
-        let mut sub_builder = DisplayListBuilder::new(sub_pipeline_id);
+        let mut sub_builder = DisplayListBuilder::new(sub_pipeline_id, sub_bounds.size);
         let mut space_and_clip = SpaceAndClipInfo::root_scroll(pipeline_id);
 
         sub_builder.push_simple_stacking_context(
@@ -68,10 +67,7 @@ impl Example for App {
             space_and_clip.spatial_id,
             TransformStyle::Flat,
             PropertyBinding::Binding(PropertyBindingKey::new(42), LayoutTransform::identity()),
-            ReferenceFrameKind::Transform {
-                is_2d_scale_translation: false,
-                should_snap: false,
-            },
+            ReferenceFrameKind::Transform,
         );
 
         // And this is for the root pipeline

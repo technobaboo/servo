@@ -34,10 +34,9 @@ use servo_media::player::{PlaybackState, Player, PlayerError, PlayerEvent, SeekL
 use servo_media::{ClientContextId, ServoMedia, SupportsMediaType};
 use servo_url::ServoUrl;
 use time::{self, Duration, Timespec};
-use webrender_api::{
-    ExternalImageData, ExternalImageId, ExternalImageType, ImageBufferKind, ImageData,
-    ImageDescriptor, ImageDescriptorFlags, ImageFormat, ImageKey,
-};
+use webrender_api::ImageKey;
+use webrender_api::{ExternalImageData, ExternalImageId, ExternalImageType, TextureTarget};
+use webrender_api::{ImageData, ImageDescriptor, ImageDescriptorFlags, ImageFormat};
 
 use crate::document_loader::{LoadBlocker, LoadType};
 use crate::dom::attr::Attr;
@@ -230,9 +229,9 @@ impl VideoFrameRenderer for MediaFrameRenderer {
 
                 let image_data = if frame.is_gl_texture() && self.player_id.is_some() {
                     let texture_target = if frame.is_external_oes() {
-                        ImageBufferKind::TextureExternal
+                        TextureTarget::External
                     } else {
-                        ImageBufferKind::Texture2D
+                        TextureTarget::Default
                     };
 
                     ImageData::External(ExternalImageData {
@@ -259,9 +258,9 @@ impl VideoFrameRenderer for MediaFrameRenderer {
 
                 let image_data = if frame.is_gl_texture() && self.player_id.is_some() {
                     let texture_target = if frame.is_external_oes() {
-                        ImageBufferKind::TextureExternal
+                        TextureTarget::External
                     } else {
-                        ImageBufferKind::Texture2D
+                        TextureTarget::Default
                     };
 
                     ImageData::External(ExternalImageData {

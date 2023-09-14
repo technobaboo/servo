@@ -5,7 +5,7 @@
 use std::fs::File;
 use std::path::{Path, PathBuf};
 
-use api::{ExternalImageData, ImageDescriptor};
+use api::{CaptureBits, ExternalImageData, ImageDescriptor};
 #[cfg(feature = "png")]
 use api::ImageFormat;
 use api::units::TexelRect;
@@ -13,7 +13,6 @@ use api::units::TexelRect;
 use api::units::DeviceIntSize;
 #[cfg(feature = "capture")]
 use crate::print_tree::{PrintableTree, PrintTree};
-use crate::render_api::CaptureBits;
 use ron;
 use serde;
 
@@ -42,9 +41,10 @@ impl CaptureConfig {
             frame_id: 0,
             resource_id: 0,
             #[cfg(feature = "capture")]
-            pretty: ron::ser::PrettyConfig::new()
-                .with_enumerate_arrays(true)
-                .with_indentor(" ".to_string()),
+            pretty: ron::ser::PrettyConfig {
+                enumerate_arrays: true,
+                .. ron::ser::PrettyConfig::default()
+            },
         }
     }
 

@@ -12,8 +12,7 @@ use log::debug;
 use sparkle::gl::GlType;
 use surfman::chains::{SwapChainAPI, SwapChains, SwapChainsAPI};
 use surfman::{Device, SurfaceInfo, SurfaceTexture};
-use webrender::RenderApiSender;
-use webrender_api::DocumentId;
+use webrender_api::{DocumentId, RenderApiSender};
 use webrender_surfman::WebrenderSurfman;
 use webrender_traits::{
     WebrenderExternalImageApi, WebrenderExternalImageRegistry, WebrenderImageSource,

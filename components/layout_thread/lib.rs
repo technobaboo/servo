@@ -108,7 +108,7 @@ use style::thread_state::{self, ThreadState};
 use style::traversal::DomTraversal;
 use style::traversal_flags::TraversalFlags;
 use style_traits::{CSSPixel, DevicePixel, SpeculativePainter};
-use webrender_api::{units, ColorF, HitTestFlags};
+use webrender_api::{units, ColorF, HitTestFlags, ScrollClamping};
 
 /// Information needed by the layout thread.
 pub struct LayoutThread {
@@ -1072,7 +1072,7 @@ impl LayoutThread {
                     .maybe_observe_paint_time(self, epoch, is_contentful.0);
 
                 self.webrender_api
-                    .send_display_list(compositor_info, builder.finalize().1);
+                    .send_display_list(compositor_info, builder.finalize());
             },
         );
     }
@@ -1507,8 +1507,11 @@ impl LayoutThread {
             .insert(state.scroll_id, state.scroll_offset);
 
         let point = Point2D::new(-state.scroll_offset.x, -state.scroll_offset.y);
-        self.webrender_api
-            .send_scroll_node(units::LayoutPoint::from_untyped(point), state.scroll_id);
+        self.webrender_api.send_scroll_node(
+            units::LayoutPoint::from_untyped(point),
+            state.scroll_id,
+            ScrollClamping::ToContentBounds,
+        );
     }
 
     fn set_scroll_states<'a, 'b>(

@@ -2,11 +2,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-extern crate euclid;
-extern crate gleam;
-extern crate glutin;
-extern crate webrender;
-extern crate winit;
+use euclid;
+use gleam;
+use glutin;
+use webrender;
+use winit;
 
 use gleam::gl;
 use glutin::NotCurrent;
@@ -14,7 +14,6 @@ use std::fs::File;
 use std::io::Read;
 use webrender::api::*;
 use webrender::api::units::*;
-use webrender::render_api::*;
 use webrender::DebugFlags;
 use winit::dpi::LogicalSize;
 
@@ -35,7 +34,7 @@ impl RenderNotifier for Notifier {
         })
     }
 
-    fn wake_up(&self, _composite_needed: bool) {
+    fn wake_up(&self) {
         #[cfg(not(target_os = "android"))]
         let _ = self.events_proxy.wakeup();
     }
@@ -43,9 +42,9 @@ impl RenderNotifier for Notifier {
     fn new_frame_ready(&self,
                        _: DocumentId,
                        _scrolled: bool,
-                       composite_needed: bool,
+                       _composite_needed: bool,
                        _render_time: Option<u64>) {
-        self.wake_up(composite_needed);
+        self.wake_up();
     }
 }
 
@@ -105,9 +104,9 @@ impl Window {
             DeviceIntSize::new(size.width as i32, size.height as i32)
         };
         let notifier = Box::new(Notifier::new(events_loop.create_proxy()));
-        let (renderer, sender) = webrender::Renderer::new(gl.clone(), notifier, opts, None).unwrap();
+        let (renderer, sender) = webrender::Renderer::new(gl.clone(), notifier, opts, None, device_size).unwrap();
         let mut api = sender.create_api();
-        let document_id = api.add_document(device_size);
+        let document_id = api.add_document(device_size, 0);
 
         let epoch = Epoch(0);
         let pipeline_id = PipelineId(0, 0);
@@ -184,10 +183,10 @@ impl Window {
         };
         let layout_size = device_size.to_f32() / euclid::Scale::new(device_pixel_ratio);
         let mut txn = Transaction::new();
-        let mut builder = DisplayListBuilder::new(self.pipeline_id);
+        let mut builder = DisplayListBuilder::new(self.pipeline_id, layout_size);
         let space_and_clip = SpaceAndClipInfo::root_scroll(self.pipeline_id);
 
-        let bounds = LayoutRect::new(LayoutPoint::zero(), layout_size);
+        let bounds = LayoutRect::new(LayoutPoint::zero(), builder.content_size());
         builder.push_simple_stacking_context(
             bounds.origin,
             space_and_clip.spatial_id,
@@ -285,11 +284,11 @@ impl Window {
             true,
         );
         txn.set_root_pipeline(self.pipeline_id);
-        txn.generate_frame(0);
+        txn.generate_frame();
         api.send_transaction(self.document_id, txn);
 
         renderer.update();
-        renderer.render(device_size, 0).unwrap();
+        renderer.render(device_size).unwrap();
         context.swap_buffers().ok();
 
         self.context = Some(unsafe { context.make_not_current().unwrap() });

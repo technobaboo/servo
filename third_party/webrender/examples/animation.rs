@@ -10,11 +10,11 @@
 //! rounded cornered rectangle, which is done automatically during the
 //! scene building for render optimization.
 
-extern crate euclid;
-extern crate gleam;
-extern crate glutin;
-extern crate webrender;
-extern crate winit;
+use euclid;
+use gleam;
+use glutin;
+use webrender;
+use winit;
 
 #[path = "common/boilerplate.rs"]
 mod boilerplate;
@@ -22,7 +22,6 @@ mod boilerplate;
 use crate::boilerplate::{Example, HandyDandyRectBuilder};
 use euclid::Angle;
 use webrender::api::*;
-use webrender::render_api::*;
 use webrender::api::units::*;
 
 
@@ -63,10 +62,7 @@ impl App {
             SpatialId::root_scroll_node(pipeline_id),
             TransformStyle::Flat,
             PropertyBinding::Binding(property_key, LayoutTransform::identity()),
-            ReferenceFrameKind::Transform {
-                is_2d_scale_translation: false,
-                should_snap: false,
-            },
+            ReferenceFrameKind::Transform,
         );
 
         builder.push_simple_stacking_context_with_filters(
@@ -198,7 +194,7 @@ impl Example for App {
                         colors: vec![],
                     },
                 );
-                txn.generate_frame(0);
+                txn.generate_frame();
                 api.send_transaction(document_id, txn);
             }
             _ => (),
