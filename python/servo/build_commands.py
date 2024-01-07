@@ -74,7 +74,7 @@ class MachCommands(CommandBase):
         if very_verbose:
             opts += ["-vv"]
 
-        env = self.build_env(is_build=True)
+        env = self.build_env()
         self.ensure_bootstrapped()
         self.ensure_clobbered()
 

@@ -69,7 +69,7 @@ jobs:
     # Ubuntu 22.04 has glibc 2.34 so the binaries produced
     # won't run on systems with older glibc e.g wpt.fyi
     # runners which still use 20.04.
-    runs-on: ubuntu-${{ inputs.upload && '20.04' || '22.04' }}
+    runs-on: ubuntu-${{ inputs.upload && '20.04' || '20.04' }}
     steps:
       - uses: actions/checkout@v3
         if: github.event_name != 'pull_request_target'
@@ -92,7 +92,7 @@ jobs:
         with:
           crate: taplo-cli
           locked: true
-          cache-key: ${{ inputs.upload && '20.04' || '22.04' }}
+          cache-key: ${{ inputs.upload && '20.04' || '20.04' }}
       - name: Bootstrap Python
         run: python3 -m pip install --upgrade pip
       - name: Bootstrap dependencies
