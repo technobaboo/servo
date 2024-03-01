@@ -9,7 +9,7 @@ use euclid::default::Rect;
 use euclid::SideOffsets2D;
 use gfx_traits::print_tree::PrintTree;
 use log::warn;
-use script_traits::compositor::{ScrollTreeNodeId, ScrollableNodeInfo};
+use script_traits::compositor::{ScrollSensitivity, ScrollTreeNodeId, ScrollableNodeInfo};
 use servo_arc::Arc as ServoArc;
 use servo_config::opts::DebugOptions;
 use style::computed_values::float::T as ComputedFloat;
@@ -23,9 +23,8 @@ use style::values::generics::transform;
 use style::values::specified::box_::DisplayOutside;
 use webrender_api as wr;
 use webrender_api::units::{LayoutPoint, LayoutRect, LayoutTransform, LayoutVector2D};
-use webrender_api::ScrollSensitivity;
 use wr::units::{LayoutPixel, LayoutSize};
-use wr::StickyOffsetBounds;
+use wr::{SpatialTreeItemKey, StickyOffsetBounds};
 
 use super::DisplayList;
 use crate::cell::ArcRefCell;
@@ -95,9 +94,14 @@ impl DisplayList {
         fragment_tree: &FragmentTree,
         debug: &DebugOptions,
     ) -> StackingContext {
-        let root_clip_chain_id = self
-            .wr
-            .define_clip_chain(None, [wr::ClipId::root(self.wr.pipeline_id)]);
+        let root_clip_id = self.wr.define_clip_rect(
+            self.compositor_info.root_reference_frame_id.spatial_id,
+            LayoutRect::from_origin_and_size(
+                LayoutPoint::zero(),
+                self.compositor_info.viewport_size,
+            ),
+        );
+        let root_clip_chain_id = self.wr.define_clip_chain(None, [root_clip_id]);
 
         let cb_for_non_fixed_descendants = ContainingBlock::new(
             fragment_tree.initial_containing_block,
@@ -152,6 +156,7 @@ impl DisplayList {
             transform_style,
             transform,
             kind,
+            SpatialTreeItemKey::new(0, 0), // TODO: We need to set this to a real value.
         );
         self.compositor_info.scroll_tree.add_scroll_tree_node(
             Some(parent_scroll_node_id),
@@ -173,36 +178,31 @@ impl DisplayList {
         clip_rect: LayoutRect,
         scroll_sensitivity: ScrollSensitivity,
     ) -> (ScrollTreeNodeId, wr::ClipChainId) {
-        let parent_space_and_clip_info = wr::SpaceAndClipInfo {
-            spatial_id: parent_scroll_node_id.spatial_id,
-            clip_id: wr::ClipId::root(self.wr.pipeline_id),
-        };
         let new_clip_id = self
             .wr
-            .define_clip_rect(&parent_space_and_clip_info, clip_rect);
+            .define_clip_rect(parent_scroll_node_id.spatial_id, clip_rect);
 
         let new_clip_chain_id = self
             .wr
             .define_clip_chain(Some(*parent_clip_chain_id), [new_clip_id]);
 
-        let new_spatial_id = self
-            .wr
-            .define_scroll_frame(
-                &parent_space_and_clip_info,
-                external_id,
-                content_rect,
-                clip_rect,
-                scroll_sensitivity,
-                LayoutVector2D::zero(), /* external_scroll_offset */
-            )
-            .spatial_id;
+        let new_spatial_id = self.wr.define_scroll_frame(
+            parent_scroll_node_id.spatial_id,
+            external_id,
+            content_rect,
+            clip_rect,
+            LayoutVector2D::zero(), /* external_scroll_offset */
+            0,                      /* scroll_offset_generation */
+            wr::HasScrollLinkedEffect::No,
+            SpatialTreeItemKey::new(0, 0), // TODO: Get a real key
+        );
 
         let new_scroll_node_id = self.compositor_info.scroll_tree.add_scroll_tree_node(
             Some(parent_scroll_node_id),
             new_spatial_id,
             Some(ScrollableNodeInfo {
                 external_id,
-                scrollable_size: content_rect.size - clip_rect.size,
+                scrollable_size: content_rect.size() - clip_rect.size(),
                 scroll_sensitivity,
                 offset: LayoutVector2D::zero(),
             }),
@@ -224,7 +224,8 @@ impl DisplayList {
             margins,
             vertical_offset_bounds,
             horizontal_offset_bounds,
-            LayoutVector2D::zero(),
+            LayoutVector2D::zero(),        /* previously_applied_offset */
+            SpatialTreeItemKey::new(0, 0), // Get a real key
         );
         self.compositor_info.scroll_tree.add_scroll_tree_node(
             Some(parent_scroll_node_id),
@@ -471,8 +472,6 @@ impl StackingContext {
             return false;
         }
 
-        let clip_id = self.clip_chain_id.map(wr::ClipId::ClipChain);
-
         // Create the filter pipeline.
         let current_color = style.clone_color();
         let mut filters: Vec<wr::FilterOp> = effects
@@ -498,7 +497,7 @@ impl StackingContext {
             LayoutPoint::zero(), // origin
             self.spatial_id,
             style.get_webrender_primitive_flags(),
-            clip_id,
+            self.clip_chain_id,
             style.get_used_transform_style().to_webrender(),
             effects.mix_blend_mode.to_webrender(),
             &filters,
@@ -621,13 +620,13 @@ impl StackingContext {
         if let Some(reference_frame_data) =
             box_fragment.reference_frame_data_if_necessary(containing_block_rect)
         {
-            painting_area.origin -= reference_frame_data.origin.to_webrender().to_vector();
+            painting_area.min -= reference_frame_data.origin.to_webrender().to_vector();
             if let Some(transformed) = reference_frame_data
                 .transform
                 .inverse()
-                .and_then(|inversed| inversed.outer_transformed_rect(&painting_area))
+                .and_then(|inversed| inversed.outer_transformed_rect(&painting_area.to_rect()))
             {
-                painting_area = transformed
+                painting_area = transformed.to_box2d();
             } else {
                 // The desired rect cannot be represented, so skip painting this background-image
                 return;
@@ -1219,14 +1218,9 @@ impl BoxFragment {
             .translate(containing_block_rect.origin.to_vector())
             .to_webrender();
 
-        let parent_space_and_clip = &wr::SpaceAndClipInfo {
-            spatial_id: parent_scroll_node_id.spatial_id,
-            clip_id: wr::ClipId::root(display_list.wr.pipeline_id),
-        };
-
         let clip_id = display_list
             .wr
-            .define_clip_rect(parent_space_and_clip, clip_rect);
+            .define_clip_rect(parent_scroll_node_id.spatial_id, clip_rect);
         Some(
             display_list
                 .wr
@@ -1276,7 +1270,7 @@ impl BoxFragment {
             sensitivity,
         );
 
-        Some((scroll_tree_node_id, clip_chain_id, padding_rect.size))
+        Some((scroll_tree_node_id, clip_chain_id, padding_rect.size()))
     }
 
     fn build_sticky_frame_if_necessary(
@@ -1343,12 +1337,12 @@ impl BoxFragment {
         // This is the minimum negative offset and then the maximum positive offset. We just
         // specify every edge, but if the corresponding margin is None, that offset has no effect.
         let vertical_offset_bounds = wr::StickyOffsetBounds::new(
-            containing_block_rect.min_y() - frame_rect.min_y(),
-            containing_block_rect.max_y() - frame_rect.max_y(),
+            containing_block_rect.min.y - frame_rect.min.y,
+            containing_block_rect.max.y - frame_rect.max.y,
         );
         let horizontal_offset_bounds = wr::StickyOffsetBounds::new(
-            containing_block_rect.min_x() - frame_rect.min_x(),
-            containing_block_rect.max_x() - frame_rect.max_x(),
+            containing_block_rect.min.x - frame_rect.min.x,
+            containing_block_rect.max.x - frame_rect.max.x,
         );
 
         let margins = SideOffsets2D::new(
@@ -1398,6 +1392,7 @@ impl BoxFragment {
                 wr::ReferenceFrameKind::Transform {
                     is_2d_scale_translation: false,
                     should_snap: false,
+                    paired_with_perspective: false,
                 },
             ),
             (Some(transform), Some(perspective)) => (

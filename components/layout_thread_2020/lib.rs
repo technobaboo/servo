@@ -1062,6 +1062,7 @@ impl LayoutThread {
             self.id.to_webrender(),
             epoch.into(),
         );
+        display_list.wr.begin();
 
         // `dump_serialized_display_list` doesn't actually print anything. It sets up
         // the display list for printing the serialized version when `finalize()` is called.
@@ -1097,7 +1098,7 @@ impl LayoutThread {
 
         if reflow_goal.needs_display() {
             self.webrender_api
-                .send_display_list(display_list.compositor_info, display_list.wr.finalize().1);
+                .send_display_list(display_list.compositor_info, display_list.wr.end().1);
         }
 
         self.update_iframe_sizes(iframe_sizes);

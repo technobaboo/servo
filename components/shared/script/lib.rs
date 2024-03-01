@@ -1192,8 +1192,14 @@ impl WebrenderIpcSender {
             warn!("Error sending display list: {}", e);
         }
 
-        if let Err(e) = display_list_sender.send(&display_list_data) {
-            warn!("Error sending display data: {}", e);
+        if let Err(error) = display_list_sender.send(&display_list_data.items_data) {
+            warn!("Error sending display list items: {}", error);
+        }
+        if let Err(error) = display_list_sender.send(&display_list_data.cache_data) {
+            warn!("Error sending display list cache data: {}", error);
+        }
+        if let Err(error) = display_list_sender.send(&display_list_data.spatial_tree) {
+            warn!("Error sending display spatial tree: {}", error);
         }
     }
 

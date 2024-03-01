@@ -27,6 +27,7 @@ use log::{debug, warn};
 use msg::constellation_msg::{BrowsingContextId, PipelineId};
 use net_traits::image_cache::UsePlaceholder;
 use range::Range;
+use script_traits::compositor::ScrollSensitivity;
 use servo_config::opts;
 use servo_geometry::{self, MaxRect};
 use style::color::AbsoluteColor;
@@ -49,7 +50,7 @@ use webrender_api::units::{LayoutRect, LayoutTransform, LayoutVector2D};
 use webrender_api::{
     self, BorderDetails, BorderRadius, BorderSide, BoxShadowClipMode, ColorF, ColorU,
     ExternalScrollId, FilterOp, GlyphInstance, ImageRendering, LineStyle, NinePatchBorder,
-    NinePatchBorderSource, NormalBorder, PropertyBinding, ScrollSensitivity, StickyOffsetBounds,
+    NinePatchBorderSource, NormalBorder, PropertyBinding, StickyOffsetBounds,
 };
 
 use crate::block::BlockFlow;
@@ -1219,7 +1220,7 @@ impl Fragment {
                 )?;
                 width = image.width;
                 height = image.height;
-                NinePatchBorderSource::Image(image.key?)
+                NinePatchBorderSource::Image(image.key?, ImageRendering::Auto)
             },
             Image::PaintWorklet(ref paint_worklet) => {
                 let image = self.get_webrender_image_for_paint_worklet(
@@ -1230,7 +1231,7 @@ impl Fragment {
                 )?;
                 width = image.width;
                 height = image.height;
-                NinePatchBorderSource::Image(image.key?)
+                NinePatchBorderSource::Image(image.key?, ImageRendering::Auto)
             },
             Image::Gradient(ref gradient) => match **gradient {
                 Gradient::Linear {
@@ -1286,7 +1287,6 @@ impl Fragment {
             fill: border_image_fill,
             repeat_horizontal: border_image_repeat.0.to_layout(),
             repeat_vertical: border_image_repeat.1.to_layout(),
-            outset: SideOffsets2D::zero(),
         });
         state.add_display_item(DisplayItem::Border(CommonDisplayItem::with_data(
             base,
@@ -1405,7 +1405,7 @@ impl Fragment {
         );
         // TODO(gw): Use a better estimate for wavy line thickness.
         let area = baseline.to_layout();
-        let wavy_line_thickness = (0.33 * area.size.height).ceil();
+        let wavy_line_thickness = (0.33 * area.size().height).ceil();
         state.add_display_item(DisplayItem::Line(CommonDisplayItem::new(
             base,
             webrender_api::LineDisplayItem {
@@ -1857,7 +1857,7 @@ impl Fragment {
                     //         looks bogus.
                     state.iframe_sizes.insert(
                         browsing_context_id,
-                        euclid::Size2D::new(bounds.size.width, bounds.size.height),
+                        euclid::Size2D::new(bounds.size().width, bounds.size().height),
                     );
 
                     let pipeline_id = match fragment_info.pipeline_id {
@@ -2234,7 +2234,7 @@ impl Fragment {
 
         // TODO(gw): Use a better estimate for wavy line thickness.
         let area = stacking_relative_box.to_layout();
-        let wavy_line_thickness = (0.33 * area.size.height).ceil();
+        let wavy_line_thickness = (0.33 * area.size().height).ceil();
         state.add_display_item(DisplayItem::Line(CommonDisplayItem::new(
             base,
             webrender_api::LineDisplayItem {
@@ -3121,6 +3121,6 @@ trait ToF32Px {
 impl ToF32Px for Rect<Au> {
     type Output = LayoutRect;
     fn to_f32_px(&self) -> LayoutRect {
-        LayoutRect::from_untyped(&servo_geometry::au_rect_to_f32_rect(*self))
+        LayoutRect::from_untyped(&servo_geometry::au_rect_to_f32_rect(*self).to_box2d())
     }
 }

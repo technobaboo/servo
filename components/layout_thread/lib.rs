@@ -872,7 +872,7 @@ impl LayoutThread {
                 self.epoch.set(epoch);
 
                 // TODO: Avoid the temporary conversion and build webrender sc/dl directly!
-                let (builder, compositor_info, is_contentful) =
+                let (mut builder, compositor_info, is_contentful) =
                     display_list.convert_to_webrender(self.id, viewport_size, epoch.into());
 
                 // Observe notifications about rendered frames if needed right before
@@ -882,7 +882,7 @@ impl LayoutThread {
                     .maybe_observe_paint_time(self, epoch, is_contentful.0);
 
                 self.webrender_api
-                    .send_display_list(compositor_info, builder.finalize().1);
+                    .send_display_list(compositor_info, builder.end().1);
             },
         );
     }

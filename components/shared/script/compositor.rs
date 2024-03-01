@@ -7,9 +7,17 @@
 use embedder_traits::Cursor;
 use serde::{Deserialize, Serialize};
 use webrender_api::units::{LayoutSize, LayoutVector2D};
-use webrender_api::{
-    Epoch, ExternalScrollId, PipelineId, ScrollLocation, ScrollSensitivity, SpatialId,
-};
+use webrender_api::{Epoch, ExternalScrollId, PipelineId, ScrollLocation, SpatialId};
+
+/// The scroll sensitivity of a scroll node ie whether it can be scrolled due to input event and
+/// script events or only script events.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+pub enum ScrollSensitivity {
+    /// This node can be scrolled by input and script events.
+    ScriptAndInputEvents,
+    /// This node can only be scrolled by script events.
+    Script,
+}
 
 /// Information that Servo keeps alongside WebRender display items
 /// in order to add more context to hit test results.

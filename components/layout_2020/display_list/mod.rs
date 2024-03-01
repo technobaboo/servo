@@ -22,7 +22,7 @@ use style::values::computed::{BorderStyle, Color, Length, LengthPercentage, Outl
 use style::values::specified::text::TextDecorationLine;
 use style::values::specified::ui::CursorKind;
 use style_traits::CSSPixel;
-use webrender_api::{self as wr, units, ClipChainId, ClipId, CommonItemProperties};
+use webrender_api::{self as wr, units, ClipChainId};
 
 use crate::context::LayoutContext;
 use crate::display_list::conversions::ToWebRender;
@@ -160,7 +160,7 @@ impl<'a> DisplayListBuilder<'a> {
         wr::CommonItemProperties {
             clip_rect,
             spatial_id: self.current_scroll_node_id.spatial_id,
-            clip_id: ClipId::ClipChain(self.current_clip_chain_id),
+            clip_chain_id: self.current_clip_chain_id,
             flags: style.get_webrender_primitive_flags(),
         }
     }
@@ -261,7 +261,7 @@ impl Fragment {
                         common.clip_rect,
                         &wr::SpaceAndClipInfo {
                             spatial_id: common.spatial_id,
-                            clip_id: common.clip_id,
+                            clip_chain_id: common.clip_chain_id,
                         },
                         iframe.pipeline_id.to_webrender(),
                         true,
@@ -297,12 +297,10 @@ impl Fragment {
         let clip_chain_id = builder.current_clip_chain_id;
         let spatial_id = builder.current_scroll_node_id.spatial_id;
         builder.wr().push_hit_test(
-            &CommonItemProperties {
-                clip_rect: rect.to_webrender(),
-                clip_id: ClipId::ClipChain(clip_chain_id),
-                spatial_id,
-                flags: style.get_webrender_primitive_flags(),
-            },
+            rect.to_webrender(),
+            clip_chain_id,
+            spatial_id,
+            style.get_webrender_primitive_flags(),
             hit_info,
         );
     }
@@ -398,7 +396,7 @@ impl Fragment {
         color: &AbsoluteColor,
     ) {
         let rect = rect.to_webrender();
-        let wavy_line_thickness = (0.33 * rect.size.height).ceil();
+        let wavy_line_thickness = (0.33 * rect.size().height).ceil();
         let text_decoration_color = fragment
             .parent_style
             .clone_text_decoration_color()
@@ -445,8 +443,8 @@ impl<'a> BuilderForBoxFragment<'a> {
             };
             let corner = |corner: &style::values::computed::BorderCornerRadius| {
                 Size2D::new(
-                    resolve(&corner.0.width.0, border_rect.size.width),
-                    resolve(&corner.0.height.0, border_rect.size.height),
+                    resolve(&corner.0.width.0, border_rect.size().width),
+                    resolve(&corner.0.height.0, border_rect.size().height),
                 )
             };
             let b = fragment.style.get_border();
@@ -569,9 +567,15 @@ impl<'a> BuilderForBoxFragment<'a> {
 
         let mut common = builder.common_properties(self.border_rect, &self.fragment.style);
         if let Some(clip_chain_id) = self.border_edge_clip(builder) {
-            common.clip_id = ClipId::ClipChain(clip_chain_id);
+            common.clip_chain_id = clip_chain_id;
         }
-        builder.wr().push_hit_test(&common, hit_info);
+        builder.wr().push_hit_test(
+            common.clip_rect,
+            common.clip_chain_id,
+            common.spatial_id,
+            common.flags,
+            hit_info,
+        );
     }
 
     fn build_background_for_painter(
@@ -957,13 +961,10 @@ fn clip_for_radii(
     if radii.is_zero() {
         None
     } else {
-        let clip_chain_id = builder.current_clip_chain_id;
-        let parent_space_and_clip = wr::SpaceAndClipInfo {
-            spatial_id: builder.current_scroll_node_id.spatial_id,
-            clip_id: ClipId::ClipChain(clip_chain_id),
-        };
+        let spatial_id = builder.current_scroll_node_id.spatial_id;
+        let parent_clip_chain_id = builder.current_clip_chain_id;
         let new_clip_id = builder.wr().define_clip_rounded_rect(
-            &parent_space_and_clip,
+            spatial_id,
             wr::ComplexClipRegion {
                 rect,
                 radii,
@@ -973,7 +974,7 @@ fn clip_for_radii(
         Some(
             builder
                 .wr()
-                .define_clip_chain(Some(clip_chain_id), [new_clip_id]),
+                .define_clip_chain(Some(parent_clip_chain_id), [new_clip_id]),
         )
     }
 }

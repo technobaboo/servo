@@ -22,7 +22,7 @@ use gfx_traits::print_tree::PrintTree;
 use gfx_traits::{self, StackingContextId};
 use msg::constellation_msg::PipelineId;
 use net_traits::image::base::Image;
-use script_traits::compositor::ScrollTreeNodeId;
+use script_traits::compositor::{ScrollSensitivity, ScrollTreeNodeId};
 use serde::Serialize;
 use servo_geometry::MaxRect;
 use style::computed_values::_servo_top_layer::T as InTopLayer;
@@ -30,9 +30,9 @@ pub use style::dom::OpaqueNode;
 use webrender_api as wr;
 use webrender_api::units::{LayoutPixel, LayoutRect, LayoutTransform};
 use webrender_api::{
-    BorderRadius, ClipChainId, ClipId, ClipMode, CommonItemProperties, ComplexClipRegion,
-    ExternalScrollId, FilterOp, GlyphInstance, GradientStop, ImageKey, MixBlendMode,
-    PrimitiveFlags, ScrollSensitivity, Shadow, SpatialId, StickyOffsetBounds, TransformStyle,
+    BorderRadius, ClipChainId, ClipMode, CommonItemProperties, ComplexClipRegion, ExternalScrollId,
+    FilterOp, GlyphInstance, GradientStop, ImageKey, MixBlendMode, PrimitiveFlags, Shadow,
+    SpatialId, StickyOffsetBounds, TransformStyle,
 };
 
 /// The factor that we multiply the blur radius by in order to inflate the boundaries of display
@@ -493,7 +493,7 @@ impl BaseDisplayItem {
 pub fn empty_common_item_properties() -> CommonItemProperties {
     CommonItemProperties {
         clip_rect: LayoutRect::max_rect(),
-        clip_id: ClipId::root(wr::PipelineId::dummy()),
+        clip_chain_id: ClipChainId::INVALID,
         spatial_id: SpatialId::root_scroll_node(wr::PipelineId::dummy()),
         flags: PrimitiveFlags::empty(),
     }
