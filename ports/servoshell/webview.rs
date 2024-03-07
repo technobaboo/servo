@@ -586,12 +586,12 @@ where
 
                     self.webviews.insert(new_webview_id, WebView { rect });
                     self.creation_order.push(new_webview_id);
-                    self.queue_embedder_event(EmbedderEvent::FocusWebView(new_webview_id));
                     self.queue_embedder_event(EmbedderEvent::MoveResizeWebView(
                         new_webview_id,
                         rect,
                     ));
                     self.queue_embedder_event(EmbedderEvent::RaiseWebViewToTop(new_webview_id));
+                    self.queue_embedder_event(EmbedderEvent::FocusWebView(new_webview_id));
                 },
                 EmbedderMsg::WebViewClosed(webview_id) => {
                     self.webviews.retain(|&id, _| id != webview_id);
