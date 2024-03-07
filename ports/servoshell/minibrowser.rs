@@ -313,6 +313,9 @@ impl Minibrowser {
                 });
 
             if !embedder_events.is_empty() {
+                for event in embedder_events.iter() {
+                    info!("Queueing embedder event: {event:?}");
+                }
                 webviews.handle_window_events(embedder_events);
             }
 

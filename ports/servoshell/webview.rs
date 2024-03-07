@@ -586,12 +586,12 @@ where
 
                     self.webviews.insert(new_webview_id, WebView { rect });
                     self.creation_order.push(new_webview_id);
-                    self.event_queue
-                        .push(EmbedderEvent::FocusWebView(new_webview_id));
-                    self.event_queue
-                        .push(EmbedderEvent::MoveResizeWebView(new_webview_id, rect));
-                    self.event_queue
-                        .push(EmbedderEvent::RaiseWebViewToTop(new_webview_id));
+                    self.queue_embedder_event(EmbedderEvent::FocusWebView(new_webview_id));
+                    self.queue_embedder_event(EmbedderEvent::MoveResizeWebView(
+                        new_webview_id,
+                        rect,
+                    ));
+                    self.queue_embedder_event(EmbedderEvent::RaiseWebViewToTop(new_webview_id));
                 },
                 EmbedderMsg::WebViewClosed(webview_id) => {
                     self.webviews.retain(|&id, _| id != webview_id);
@@ -601,8 +601,12 @@ where
                     if self.focused_webview_id == Some(webview_id) {
                         self.focused_webview_id = None;
                         if let Some(&last_focused_webview_id) = self.focus_order.last() {
-                            self.event_queue
-                                .push(EmbedderEvent::FocusWebView(last_focused_webview_id));
+                            self.queue_embedder_event(EmbedderEvent::RaiseWebViewToTop(
+                                last_focused_webview_id,
+                            ));
+                            self.queue_embedder_event(EmbedderEvent::FocusWebView(
+                                last_focused_webview_id,
+                            ));
                         }
                     }
                     if self.webviews.is_empty() {
@@ -727,10 +731,8 @@ where
                 EmbedderMsg::EventDelivered(event) => match (webview_id, event) {
                     (Some(webview_id), CompositorEventVariant::MouseButtonEvent) => {
                         trace!("{}: Got a mouse button event", webview_id);
-                        self.event_queue
-                            .push(EmbedderEvent::RaiseWebViewToTop(webview_id));
-                        self.event_queue
-                            .push(EmbedderEvent::FocusWebView(webview_id));
+                        self.queue_embedder_event(EmbedderEvent::RaiseWebViewToTop(webview_id));
+                        self.queue_embedder_event(EmbedderEvent::FocusWebView(webview_id));
                     },
                     (_, _) => {},
                 },
@@ -741,6 +743,11 @@ where
             need_present,
             history_changed,
         }
+    }
+
+    fn queue_embedder_event(&mut self, event: EmbedderEvent) {
+        info!("Queueing embedder event: {event:?}");
+        self.event_queue.push(event);
     }
 }
 
