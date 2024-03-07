@@ -175,14 +175,16 @@ impl Minibrowser {
                                 middle_clicked_tab_webview_id = Some(webview_id);
                             }
                         }
-                        if let Some(webview_id) = clicked_tab_webview_id {
+                        if let Some(clicked_tab_webview_id) = clicked_tab_webview_id {
                             // Blur then raise then focus, to avoid clickjacking.
                             embedder_events.push(EmbedderEvent::BlurWebView);
-                            embedder_events.push(EmbedderEvent::RaiseWebViewToTop(webview_id));
-                            embedder_events.push(EmbedderEvent::FocusWebView(webview_id));
+                            embedder_events
+                                .push(EmbedderEvent::RaiseWebViewToTop(clicked_tab_webview_id));
+                            embedder_events
+                                .push(EmbedderEvent::FocusWebView(clicked_tab_webview_id));
                             // Hide all other webviews, since only one needs to be visible at a time.
                             for (&webview_id, _) in webviews.creation_order() {
-                                if webview_id != webview_id {
+                                if webview_id != clicked_tab_webview_id {
                                     embedder_events.push(EmbedderEvent::HideWebView(webview_id));
                                 }
                             }
