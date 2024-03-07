@@ -451,6 +451,20 @@ where
                 msg
             );
             match msg {
+                EmbedderMsg::WebViewOpened(webview_id) |
+                EmbedderMsg::WebViewClosed(webview_id) |
+                EmbedderMsg::WebViewFocused(webview_id) => {
+                    info!("Got event: {msg:?} {webview_id:?}");
+                },
+                EmbedderMsg::WebViewBlurred => {
+                    info!("Got event: {msg:?}");
+                },
+                EmbedderMsg::WebViewPaintingOrder(ref webview_ids) => {
+                    info!("Got event: {msg:?} {webview_ids:?}");
+                },
+                _ => {},
+            }
+            match msg {
                 EmbedderMsg::Status(_status) => {
                     // FIXME: surface this status string in the UI somehow
                 },
