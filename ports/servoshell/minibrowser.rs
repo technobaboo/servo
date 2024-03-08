@@ -42,9 +42,6 @@ pub struct Minibrowser {
     last_update: Instant,
     last_mouse_position: Option<Point2D<f32, DeviceIndependentPixel>>,
     location: RefCell<String>,
-
-    /// Whether the location has been edited by the user without clicking Go.
-    location_dirty: Cell<bool>,
 }
 
 pub enum MinibrowserEvent {
@@ -85,7 +82,6 @@ impl Minibrowser {
             last_update: Instant::now(),
             last_mouse_position: None,
             location: RefCell::new(initial_url.to_string()),
-            location_dirty: false.into(),
         }
     }
 
@@ -141,7 +137,6 @@ impl Minibrowser {
             widget_surface_fbo,
             last_update,
             location,
-            location_dirty,
             ..
         } = self;
         let widget_fbo = *widget_surface_fbo;
@@ -191,6 +186,15 @@ impl Minibrowser {
                     },
                 );
             });
+
+            let mut location_dirty = None;
+            let mut location = location.borrow_mut();
+            if let Some(webview_location) = webviews.focused_webview_mut().map(|w| &w.location) {
+                if webview_location != &*location {
+                    *location = webview_location.clone();
+                }
+            }
+
             let InnerResponse { inner: height, .. } =
                 TopBottomPanel::top("toolbar").show(ctx, |ui| {
                     ui.allocate_ui_with_layout(
@@ -209,16 +213,16 @@ impl Minibrowser {
                                 |ui| {
                                     if ui.button("go").clicked() {
                                         event_queue.borrow_mut().push(MinibrowserEvent::Go);
-                                        location_dirty.set(false);
+                                        location_dirty = Some(false);
                                     }
 
                                     let location_field = ui.add_sized(
                                         ui.available_size(),
-                                        egui::TextEdit::singleline(&mut *location.borrow_mut()),
+                                        egui::TextEdit::singleline(&mut *location),
                                     );
 
                                     if location_field.changed() {
-                                        location_dirty.set(true);
+                                        location_dirty = Some(true);
                                     }
                                     if ui.input(|i| {
                                         i.clone().consume_key(Modifiers::COMMAND, Key::L)
@@ -229,7 +233,7 @@ impl Minibrowser {
                                         ui.input(|i| i.clone().key_pressed(Key::Enter))
                                     {
                                         event_queue.borrow_mut().push(MinibrowserEvent::Go);
-                                        location_dirty.set(false);
+                                        location_dirty = Some(false);
                                     }
                                 },
                             );
@@ -237,7 +241,16 @@ impl Minibrowser {
                     );
                     ui.cursor().min.y
                 });
+
             *toolbar_height = Length::new(height);
+            if let Some(webview) = webviews.focused_webview_mut() {
+                if let Some(location_dirty) = location_dirty {
+                    webview.location_dirty = location_dirty;
+                }
+                if *location != webview.location {
+                    webview.location = location.clone();
+                }
+            }
 
             let Some(focused_webview_id) = focused_webview_id else {
                 return;
@@ -370,23 +383,29 @@ impl Minibrowser {
         }
     }
 
-    /// Updates the location field from the given [BrowserManager], unless the user has started
+    /// Updates the location field from the given [WebViewManager], unless the the user has started
     /// editing it without clicking Go, returning true iff it has changed (needing an egui update).
     pub fn update_location_in_toolbar(
         &mut self,
-        browser: &mut WebViewManager<dyn WindowPortsMethods>,
+        webviews: &mut WebViewManager<dyn WindowPortsMethods>,
+        focused_webview_changed: bool,
     ) -> bool {
+        // If no webview is focused, just return true iff the focus changed.
+        let Some(webview) = webviews.focused_webview_mut() else {
+            return dbg!(focused_webview_changed);
+        };
+
         // User edited without clicking Go?
-        if self.location_dirty.get() {
+        if dbg!(webview.location_dirty) {
             return false;
         }
 
-        match browser.current_url_string() {
-            Some(location) if location != self.location.get_mut() => {
-                self.location = RefCell::new(location.to_owned());
-                true
-            },
-            _ => false,
+        let new_location = webview.current_url_string.as_deref().unwrap_or("");
+        if dbg!(new_location) != dbg!(&webview.location) {
+            webview.location = new_location.to_owned();
+            return true;
         }
+
+        false
     }
 }

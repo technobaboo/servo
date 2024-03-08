@@ -52,6 +52,7 @@ enum PumpResult {
     Shutdown,
     Continue {
         history_changed: bool,
+        focused_webview_changed: bool,
         present: Present,
     },
 }
@@ -305,12 +306,15 @@ impl App {
                 },
                 PumpResult::Continue {
                     history_changed,
+                    focused_webview_changed,
                     present,
                 } => {
-                    if history_changed {
+                    if focused_webview_changed || history_changed {
                         if let Some(mut minibrowser) = app.minibrowser() {
                             let webviews = &mut app.webviews.borrow_mut();
-                            if minibrowser.update_location_in_toolbar(webviews) {
+                            if minibrowser
+                                .update_location_in_toolbar(webviews, focused_webview_changed)
+                            {
                                 // Update the minibrowser immediately. While we could update by requesting a
                                 // redraw, doing so would delay the location update by two frames.
                                 minibrowser.update(
@@ -435,11 +439,13 @@ impl App {
         let mut need_resize = false;
         let mut need_present = false;
         let mut history_changed = false;
+        let mut focused_webview_changed = false;
         loop {
             // Consume and handle those embedder messages.
             let servo_event_response = webviews.handle_servo_events(embedder_messages);
             need_present |= servo_event_response.need_present;
             history_changed |= servo_event_response.history_changed;
+            focused_webview_changed |= servo_event_response.focused_webview_changed;
 
             // Route embedder events from the WebViewManager to the relevant Servo components,
             // receives and collects embedder messages from various Servo components,
@@ -470,6 +476,7 @@ impl App {
 
         PumpResult::Continue {
             history_changed,
+            focused_webview_changed,
             present,
         }
     }
