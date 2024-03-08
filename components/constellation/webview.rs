@@ -59,6 +59,9 @@ impl<WebView> WebViewManager<WebView> {
         }
         self.focus_order
             .retain(|b| *b != top_level_browsing_context_id);
+        self.shown_webviews.remove(&top_level_browsing_context_id);
+        self.invisible_webviews
+            .remove(&top_level_browsing_context_id);
         self.webviews.remove(&top_level_browsing_context_id)
     }
 
@@ -338,8 +341,10 @@ mod test {
         webviews.remove(id(0, 3));
         assert_eq!(webviews.is_focused, false);
 
-        // remove() removes the given webview from both the map and the focus order.
+        // remove() removes the given webview from all data structures.
         assert!(webviews_sorted(&webviews).is_empty());
         assert!(webviews.focus_order.is_empty());
+        assert!(webviews.shown_webviews.is_empty());
+        assert!(webviews.invisible_webviews.is_empty());
     }
 }
