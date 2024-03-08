@@ -612,11 +612,8 @@ impl<Window: WindowMethods + ?Sized> IOCompositor<Window> {
                 self.move_resize_webview(top_level_browsing_context_id, rect);
             },
 
-            (
-                CompositorMsg::ShowWebView(top_level_browsing_context_id),
-                ShutdownState::NotShuttingDown,
-            ) => {
-                self.webviews.show(top_level_browsing_context_id);
+            (CompositorMsg::ShowWebView(webview_id), ShutdownState::NotShuttingDown) => {
+                self.webviews.show(webview_id);
                 self.update_root_pipeline();
 
                 let painting_order = self.webviews.painting_order().map(|(&id, _)| id).collect();
@@ -626,11 +623,8 @@ impl<Window: WindowMethods + ?Sized> IOCompositor<Window> {
                 }
             },
 
-            (
-                CompositorMsg::HideWebView(top_level_browsing_context_id),
-                ShutdownState::NotShuttingDown,
-            ) => {
-                self.webviews.hide(top_level_browsing_context_id);
+            (CompositorMsg::HideWebView(webview_id), ShutdownState::NotShuttingDown) => {
+                self.webviews.hide(webview_id);
                 self.update_root_pipeline();
 
                 let painting_order = self.webviews.painting_order().map(|(&id, _)| id).collect();
@@ -640,11 +634,8 @@ impl<Window: WindowMethods + ?Sized> IOCompositor<Window> {
                 }
             },
 
-            (
-                CompositorMsg::RaiseWebViewToTop(top_level_browsing_context_id),
-                ShutdownState::NotShuttingDown,
-            ) => {
-                self.webviews.raise_to_top(top_level_browsing_context_id);
+            (CompositorMsg::RaiseWebViewToTop(webview_id), ShutdownState::NotShuttingDown) => {
+                self.webviews.raise_to_top(webview_id);
                 self.update_root_pipeline();
 
                 let painting_order = self.webviews.painting_order().map(|(&id, _)| id).collect();

@@ -4,7 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use msg::constellation_msg::TopLevelBrowsingContextId;
+use msg::constellation_msg::{TopLevelBrowsingContextId, WebViewId};
 
 #[derive(Debug)]
 pub struct WebViewManager<WebView> {
@@ -106,47 +106,30 @@ impl<WebView> WebViewManager<WebView> {
         self.is_focused = false;
     }
 
-    pub fn mark_webview_shown(&mut self, top_level_browsing_context_id: TopLevelBrowsingContextId) {
-        debug_assert!(self.webviews.contains_key(&top_level_browsing_context_id));
-        self.shown_webviews.insert(top_level_browsing_context_id);
+    pub fn mark_webview_shown(&mut self, webview_id: WebViewId) {
+        debug_assert!(self.webviews.contains_key(&webview_id));
+        self.shown_webviews.insert(webview_id);
     }
 
-    pub fn mark_webview_not_shown(
-        &mut self,
-        top_level_browsing_context_id: TopLevelBrowsingContextId,
-    ) {
-        debug_assert!(self.webviews.contains_key(&top_level_browsing_context_id));
-        self.shown_webviews.remove(&top_level_browsing_context_id);
+    pub fn mark_webview_not_shown(&mut self, webview_id: WebViewId) {
+        debug_assert!(self.webviews.contains_key(&webview_id));
+        self.shown_webviews.remove(&webview_id);
     }
 
-    pub fn mark_webview_invisible(
-        &mut self,
-        top_level_browsing_context_id: TopLevelBrowsingContextId,
-    ) {
-        debug_assert!(self.webviews.contains_key(&top_level_browsing_context_id));
-        self.invisible_webviews
-            .insert(top_level_browsing_context_id);
+    pub fn mark_webview_invisible(&mut self, webview_id: WebViewId) {
+        debug_assert!(self.webviews.contains_key(&webview_id));
+        self.invisible_webviews.insert(webview_id);
     }
 
-    pub fn mark_webview_not_invisible(
-        &mut self,
-        top_level_browsing_context_id: TopLevelBrowsingContextId,
-    ) {
-        debug_assert!(self.webviews.contains_key(&top_level_browsing_context_id));
-        self.invisible_webviews
-            .remove(&top_level_browsing_context_id);
+    pub fn mark_webview_not_invisible(&mut self, webview_id: WebViewId) {
+        debug_assert!(self.webviews.contains_key(&webview_id));
+        self.invisible_webviews.remove(&webview_id);
     }
 
     /// Returns true iff the webview is marked as shown and not marked as invisible.
-    pub fn is_effectively_visible(
-        &self,
-        top_level_browsing_context_id: TopLevelBrowsingContextId,
-    ) -> bool {
-        debug_assert!(self.webviews.contains_key(&top_level_browsing_context_id));
-        self.shown_webviews.contains(&top_level_browsing_context_id) &&
-            !self
-                .invisible_webviews
-                .contains(&top_level_browsing_context_id)
+    pub fn is_effectively_visible(&self, webview_id: WebViewId) -> bool {
+        debug_assert!(self.webviews.contains_key(&webview_id));
+        self.shown_webviews.contains(&webview_id) && !self.invisible_webviews.contains(&webview_id)
     }
 }
 

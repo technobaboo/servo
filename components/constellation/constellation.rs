@@ -1489,56 +1489,49 @@ where
                     rect,
                 ));
             },
-            FromCompositorMsg::ShowWebView(top_level_browsing_context_id) => {
-                if self.webviews.get(top_level_browsing_context_id).is_none() {
+            FromCompositorMsg::ShowWebView(webview_id) => {
+                if self.webviews.get(webview_id).is_none() {
                     return warn!(
                         "{}: ShowWebView on unknown top-level browsing context",
-                        top_level_browsing_context_id
+                        webview_id
                     );
                 }
                 self.compositor_proxy
-                    .send(CompositorMsg::ShowWebView(top_level_browsing_context_id));
-                self.webviews
-                    .mark_webview_shown(top_level_browsing_context_id);
+                    .send(CompositorMsg::ShowWebView(webview_id));
+                self.webviews.mark_webview_shown(webview_id);
                 self.notify_webview_visibility(
-                    top_level_browsing_context_id,
-                    self.webviews
-                        .is_effectively_visible(top_level_browsing_context_id),
+                    webview_id,
+                    self.webviews.is_effectively_visible(webview_id),
                 );
             },
-            FromCompositorMsg::HideWebView(top_level_browsing_context_id) => {
-                if self.webviews.get(top_level_browsing_context_id).is_none() {
+            FromCompositorMsg::HideWebView(webview_id) => {
+                if self.webviews.get(webview_id).is_none() {
                     return warn!(
                         "{}: HideWebView on unknown top-level browsing context",
-                        top_level_browsing_context_id
+                        webview_id
                     );
                 }
                 self.compositor_proxy
-                    .send(CompositorMsg::HideWebView(top_level_browsing_context_id));
-                self.webviews
-                    .mark_webview_not_shown(top_level_browsing_context_id);
+                    .send(CompositorMsg::HideWebView(webview_id));
+                self.webviews.mark_webview_not_shown(webview_id);
                 self.notify_webview_visibility(
-                    top_level_browsing_context_id,
-                    self.webviews
-                        .is_effectively_visible(top_level_browsing_context_id),
+                    webview_id,
+                    self.webviews.is_effectively_visible(webview_id),
                 );
             },
-            FromCompositorMsg::RaiseWebViewToTop(top_level_browsing_context_id) => {
-                if self.webviews.get(top_level_browsing_context_id).is_none() {
+            FromCompositorMsg::RaiseWebViewToTop(webview_id) => {
+                if self.webviews.get(webview_id).is_none() {
                     return warn!(
                         "{}: RaiseWebViewToTop on unknown top-level browsing context",
-                        top_level_browsing_context_id
+                        webview_id
                     );
                 }
-                self.compositor_proxy.send(CompositorMsg::RaiseWebViewToTop(
-                    top_level_browsing_context_id,
-                ));
-                self.webviews
-                    .mark_webview_shown(top_level_browsing_context_id);
+                self.compositor_proxy
+                    .send(CompositorMsg::RaiseWebViewToTop(webview_id));
+                self.webviews.mark_webview_shown(webview_id);
                 self.notify_webview_visibility(
-                    top_level_browsing_context_id,
-                    self.webviews
-                        .is_effectively_visible(top_level_browsing_context_id),
+                    webview_id,
+                    self.webviews.is_effectively_visible(webview_id),
                 );
             },
             FromCompositorMsg::FocusWebView(top_level_browsing_context_id) => {
