@@ -612,7 +612,13 @@ impl<Window: WindowMethods + ?Sized> IOCompositor<Window> {
                 self.move_resize_webview(top_level_browsing_context_id, rect);
             },
 
-            (CompositorMsg::ShowWebView(webview_id), ShutdownState::NotShuttingDown) => {
+            (
+                CompositorMsg::ShowWebView(webview_id, hide_others),
+                ShutdownState::NotShuttingDown,
+            ) => {
+                if hide_others {
+                    self.webviews.hide_all();
+                }
                 self.webviews.show(webview_id);
                 self.update_root_pipeline();
 
@@ -634,7 +640,13 @@ impl<Window: WindowMethods + ?Sized> IOCompositor<Window> {
                 }
             },
 
-            (CompositorMsg::RaiseWebViewToTop(webview_id), ShutdownState::NotShuttingDown) => {
+            (
+                CompositorMsg::RaiseWebViewToTop(webview_id, hide_others),
+                ShutdownState::NotShuttingDown,
+            ) => {
+                if hide_others {
+                    self.webviews.hide_all();
+                }
                 self.webviews.raise_to_top(webview_id);
                 self.update_root_pipeline();
 

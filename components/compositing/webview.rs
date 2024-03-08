@@ -69,6 +69,10 @@ impl<WebView> WebViewManager<WebView> {
             .retain(|b| *b != top_level_browsing_context_id);
     }
 
+    pub fn hide_all(&mut self) {
+        self.painting_order.clear();
+    }
+
     pub fn raise_to_top(&mut self, top_level_browsing_context_id: TopLevelBrowsingContextId) {
         self.hide(top_level_browsing_context_id);
         self.show(top_level_browsing_context_id);

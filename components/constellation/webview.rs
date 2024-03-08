@@ -106,24 +106,43 @@ impl<WebView> WebViewManager<WebView> {
         self.is_focused = false;
     }
 
-    pub fn mark_webview_shown(&mut self, webview_id: WebViewId) {
+    /// Returns true iff the webview’s effective visibility has changed.
+    pub fn mark_webview_shown(&mut self, webview_id: WebViewId) -> bool {
         debug_assert!(self.webviews.contains_key(&webview_id));
+        let old_effective_visibility = self.is_effectively_visible(webview_id);
         self.shown_webviews.insert(webview_id);
+        self.is_effectively_visible(webview_id) != old_effective_visibility
     }
 
-    pub fn mark_webview_not_shown(&mut self, webview_id: WebViewId) {
+    /// Returns true iff the webview’s effective visibility has changed.
+    pub fn mark_webview_not_shown(&mut self, webview_id: WebViewId) -> bool {
         debug_assert!(self.webviews.contains_key(&webview_id));
+        let old_effective_visibility = self.is_effectively_visible(webview_id);
         self.shown_webviews.remove(&webview_id);
+        self.is_effectively_visible(webview_id) != old_effective_visibility
     }
 
-    pub fn mark_webview_invisible(&mut self, webview_id: WebViewId) {
+    /// Returns the set of webviews whose effective visibility has changed.
+    pub fn mark_all_webviews_not_shown(&mut self) -> HashSet<WebViewId> {
+        let mut result = std::mem::take(&mut self.shown_webviews);
+        result.retain(|id| !self.invisible_webviews.contains(id));
+        result
+    }
+
+    /// Returns true iff the webview’s effective visibility has changed.
+    pub fn mark_webview_invisible(&mut self, webview_id: WebViewId) -> bool {
         debug_assert!(self.webviews.contains_key(&webview_id));
+        let old_effective_visibility = self.is_effectively_visible(webview_id);
         self.invisible_webviews.insert(webview_id);
+        self.is_effectively_visible(webview_id) != old_effective_visibility
     }
 
-    pub fn mark_webview_not_invisible(&mut self, webview_id: WebViewId) {
+    /// Returns true iff the webview’s effective visibility has changed.
+    pub fn mark_webview_not_invisible(&mut self, webview_id: WebViewId) -> bool {
         debug_assert!(self.webviews.contains_key(&webview_id));
+        let old_effective_visibility = self.is_effectively_visible(webview_id);
         self.invisible_webviews.remove(&webview_id);
+        self.is_effectively_visible(webview_id) != old_effective_visibility
     }
 
     /// Returns true iff the webview is marked as shown and not marked as invisible.
@@ -135,20 +154,27 @@ impl<WebView> WebViewManager<WebView> {
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashSet;
     use std::num::NonZeroU32;
 
     use msg::constellation_msg::{
         BrowsingContextId, BrowsingContextIndex, PipelineNamespace, PipelineNamespaceId,
-        TopLevelBrowsingContextId,
+        TopLevelBrowsingContextId, WebViewId,
     };
 
     use crate::webview::WebViewManager;
 
-    fn top_level_id(namespace_id: u32, index: u32) -> TopLevelBrowsingContextId {
+    fn id(namespace_id: u32, index: u32) -> TopLevelBrowsingContextId {
         TopLevelBrowsingContextId(BrowsingContextId {
             namespace_id: PipelineNamespaceId(namespace_id),
             index: BrowsingContextIndex(NonZeroU32::new(index).expect("Incorrect test case")),
         })
+    }
+
+    fn ids(ids: impl IntoIterator<Item = (u32, u32)>) -> HashSet<WebViewId> {
+        ids.into_iter()
+            .map(|(namespace_id, index)| id(namespace_id, index))
+            .collect()
     }
 
     fn webviews_sorted<WebView: Clone>(
@@ -181,76 +207,135 @@ mod test {
         webviews.add(TopLevelBrowsingContextId::new(), 'c');
         assert_eq!(
             webviews_sorted(&webviews),
-            vec![
-                (top_level_id(0, 1), 'a'),
-                (top_level_id(0, 2), 'b'),
-                (top_level_id(0, 3), 'c'),
-            ]
+            vec![(id(0, 1), 'a'), (id(0, 2), 'b'), (id(0, 3), 'c'),]
         );
         assert!(webviews.focus_order.is_empty());
         assert_eq!(webviews.is_focused, false);
 
         // focus() makes the given webview the latest in focus order.
-        webviews.focus(top_level_id(0, 2));
-        assert_eq!(webviews.focus_order, vec![top_level_id(0, 2)]);
+        webviews.focus(id(0, 2));
+        assert_eq!(webviews.focus_order, vec![id(0, 2)]);
         assert_eq!(webviews.is_focused, true);
-        webviews.focus(top_level_id(0, 1));
-        assert_eq!(
-            webviews.focus_order,
-            vec![top_level_id(0, 2), top_level_id(0, 1)]
-        );
+        webviews.focus(id(0, 1));
+        assert_eq!(webviews.focus_order, vec![id(0, 2), id(0, 1)]);
         assert_eq!(webviews.is_focused, true);
-        webviews.focus(top_level_id(0, 3));
-        assert_eq!(
-            webviews.focus_order,
-            vec![top_level_id(0, 2), top_level_id(0, 1), top_level_id(0, 3)]
-        );
+        webviews.focus(id(0, 3));
+        assert_eq!(webviews.focus_order, vec![id(0, 2), id(0, 1), id(0, 3)]);
         assert_eq!(webviews.is_focused, true);
 
         // unfocus() clears the “is focused” flag, but does not touch the focus order.
         webviews.unfocus();
-        assert_eq!(
-            webviews.focus_order,
-            vec![top_level_id(0, 2), top_level_id(0, 1), top_level_id(0, 3)]
-        );
+        assert_eq!(webviews.focus_order, vec![id(0, 2), id(0, 1), id(0, 3)]);
         assert_eq!(webviews.is_focused, false);
 
         // focus() avoids duplicates in focus order, when the given webview has been focused before.
-        webviews.focus(top_level_id(0, 1));
-        assert_eq!(
-            webviews.focus_order,
-            vec![top_level_id(0, 2), top_level_id(0, 3), top_level_id(0, 1)]
-        );
+        webviews.focus(id(0, 1));
+        assert_eq!(webviews.focus_order, vec![id(0, 2), id(0, 3), id(0, 1)]);
         assert_eq!(webviews.is_focused, true);
 
-        // is_effectively_visible() checks that the given webview is visible if it's shown.
-        webviews.mark_webview_shown(top_level_id(0, 1));
-        webviews.mark_webview_shown(top_level_id(0, 3));
-        assert_eq!(webviews.is_effectively_visible(top_level_id(0, 1)), true);
-        assert_eq!(webviews.is_effectively_visible(top_level_id(0, 2)), false);
-        assert_eq!(webviews.is_effectively_visible(top_level_id(0, 3)), true);
+        webviews.add(id(1, 1), ' ');
+        webviews.add(id(1, 2), ' ');
+        webviews.mark_webview_invisible(id(1, 2));
+        assert_eq!(webviews.shown_webviews, ids([]));
+        assert_eq!(webviews.invisible_webviews, ids([(1, 2)]));
 
-        // is_effectively_visible() checks that the given webview is not visible if it's invisible.
-        webviews.mark_webview_invisible(top_level_id(0, 1));
-        webviews.mark_webview_invisible(top_level_id(0, 3));
-        assert_eq!(webviews.is_effectively_visible(top_level_id(0, 1)), false);
-        assert_eq!(webviews.is_effectively_visible(top_level_id(0, 2)), false);
-        assert_eq!(webviews.is_effectively_visible(top_level_id(0, 3)), false);
+        // mark_webview_shown() returns true iff the effective visibility has changed.
+        assert_eq!(webviews.mark_webview_shown(id(1, 1)), true); // neither
+        assert_eq!(webviews.mark_webview_shown(id(1, 1)), false); // shown
+        assert_eq!(webviews.mark_webview_shown(id(1, 2)), false); // invisible
+        assert_eq!(webviews.mark_webview_shown(id(1, 2)), false); // both
+        assert_eq!(webviews.shown_webviews, ids([(1, 1), (1, 2)]));
+        assert_eq!(webviews.invisible_webviews, ids([(1, 2)]));
 
-        // mark_webview_invisible() does not destroy or prevent changes to webview visibility state.
-        webviews.mark_webview_not_shown(top_level_id(0, 1));
-        webviews.mark_webview_not_invisible(top_level_id(0, 1));
-        webviews.mark_webview_not_invisible(top_level_id(0, 3));
-        assert_eq!(webviews.is_effectively_visible(top_level_id(0, 1)), false);
-        assert_eq!(webviews.is_effectively_visible(top_level_id(0, 2)), false);
-        assert_eq!(webviews.is_effectively_visible(top_level_id(0, 3)), true);
+        webviews.mark_webview_not_shown(id(1, 2));
+        webviews.mark_webview_not_invisible(id(1, 2));
+        assert_eq!(webviews.shown_webviews, ids([(1, 1)]));
+        assert_eq!(webviews.invisible_webviews, ids([]));
+
+        // mark_webview_invisible() returns true iff the effective visibility has changed.
+        assert_eq!(webviews.mark_webview_invisible(id(1, 1)), true); // shown
+        assert_eq!(webviews.mark_webview_invisible(id(1, 1)), false); // both
+        assert_eq!(webviews.mark_webview_invisible(id(1, 2)), false); // neither
+        assert_eq!(webviews.mark_webview_invisible(id(1, 2)), false); // invisible
+        assert_eq!(webviews.shown_webviews, ids([(1, 1)]));
+        assert_eq!(webviews.invisible_webviews, ids([(1, 1), (1, 2)]));
+
+        webviews.mark_webview_shown(id(1, 2));
+        webviews.mark_webview_not_invisible(id(1, 2));
+        assert_eq!(webviews.shown_webviews, ids([(1, 1), (1, 2)]));
+        assert_eq!(webviews.invisible_webviews, ids([(1, 1)]));
+
+        // mark_webview_not_shown() returns true iff the effective visibility has changed.
+        assert_eq!(webviews.mark_webview_not_shown(id(1, 1)), false); // both
+        assert_eq!(webviews.mark_webview_not_shown(id(1, 1)), false); // invisible
+        assert_eq!(webviews.mark_webview_not_shown(id(1, 2)), true); // shown
+        assert_eq!(webviews.mark_webview_not_shown(id(1, 2)), false); // neither
+        assert_eq!(webviews.shown_webviews, ids([]));
+        assert_eq!(webviews.invisible_webviews, ids([(1, 1)]));
+
+        webviews.mark_webview_shown(id(1, 2));
+        webviews.mark_webview_invisible(id(1, 2));
+        assert_eq!(webviews.shown_webviews, ids([(1, 2)]));
+        assert_eq!(webviews.invisible_webviews, ids([(1, 1), (1, 2)]));
+
+        // mark_webview_not_invisible() returns true iff the effective visibility has changed.
+        assert_eq!(webviews.mark_webview_not_invisible(id(1, 1)), false); // invisible
+        assert_eq!(webviews.mark_webview_not_invisible(id(1, 1)), false); // neither
+        assert_eq!(webviews.mark_webview_not_invisible(id(1, 2)), true); // both
+        assert_eq!(webviews.mark_webview_not_invisible(id(1, 2)), false); // shown
+        assert_eq!(webviews.shown_webviews, ids([(1, 2)]));
+        assert_eq!(webviews.invisible_webviews, ids([]));
+
+        // is_effectively_visible() returns true iff the webview is shown and not marked invisible.
+        webviews.add(id(2, 1), ' ');
+        webviews.add(id(2, 2), ' ');
+        webviews.add(id(2, 3), ' ');
+        webviews.add(id(2, 4), ' ');
+        webviews.mark_webview_shown(id(2, 2));
+        webviews.mark_webview_shown(id(2, 4));
+        webviews.mark_webview_invisible(id(2, 3));
+        webviews.mark_webview_invisible(id(2, 4));
+        assert_eq!(webviews.is_effectively_visible(id(2, 1)), false); // neither
+        assert_eq!(webviews.is_effectively_visible(id(2, 2)), true); // shown
+        assert_eq!(webviews.is_effectively_visible(id(2, 3)), false); // invisible
+        assert_eq!(webviews.is_effectively_visible(id(2, 4)), false); // both
+
+        // mark_webview_invisible() does not destroy shown state.
+        webviews.add(id(3, 1), ' ');
+        webviews.mark_webview_shown(id(3, 1));
+        webviews.mark_webview_invisible(id(3, 1));
+        webviews.mark_webview_not_invisible(id(3, 1));
+        assert_eq!(webviews.is_effectively_visible(id(3, 1)), true);
+
+        // mark_webview_invisible() does not prevent changes to shown state.
+        webviews.add(id(4, 1), ' ');
+        webviews.mark_webview_invisible(id(4, 1));
+        webviews.mark_webview_shown(id(4, 1));
+        webviews.mark_webview_not_invisible(id(4, 1));
+        assert_eq!(webviews.is_effectively_visible(id(4, 1)), true);
 
         // remove() clears the “is focused” flag iff the given webview was focused.
-        webviews.remove(top_level_id(0, 2));
+        webviews.remove(id(1, 1));
         assert_eq!(webviews.is_focused, true);
-        webviews.remove(top_level_id(0, 1));
+        webviews.remove(id(1, 2));
+        assert_eq!(webviews.is_focused, true);
+        webviews.remove(id(2, 1));
+        assert_eq!(webviews.is_focused, true);
+        webviews.remove(id(2, 2));
+        assert_eq!(webviews.is_focused, true);
+        webviews.remove(id(2, 3));
+        assert_eq!(webviews.is_focused, true);
+        webviews.remove(id(2, 4));
+        assert_eq!(webviews.is_focused, true);
+        webviews.remove(id(3, 1));
+        assert_eq!(webviews.is_focused, true);
+        webviews.remove(id(4, 1));
+        assert_eq!(webviews.is_focused, true);
+        webviews.remove(id(0, 2));
+        assert_eq!(webviews.is_focused, true);
+        webviews.remove(id(0, 1));
         assert_eq!(webviews.is_focused, false);
-        webviews.remove(top_level_id(0, 3));
+        webviews.remove(id(0, 3));
         assert_eq!(webviews.is_focused, false);
 
         // remove() removes the given webview from both the map and the focus order.

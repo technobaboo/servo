@@ -772,14 +772,20 @@ where
                 self.compositor
                     .move_resize_webview(top_level_browsing_context_id, rect);
             },
-            EmbedderEvent::ShowWebView(top_level_browsing_context_id) => {
-                forward_to_constellation!(self, ShowWebView(top_level_browsing_context_id))
+            EmbedderEvent::ShowWebView(top_level_browsing_context_id, hide_others) => {
+                forward_to_constellation!(
+                    self,
+                    ShowWebView(top_level_browsing_context_id, hide_others)
+                )
             },
             EmbedderEvent::HideWebView(top_level_browsing_context_id) => {
                 forward_to_constellation!(self, HideWebView(top_level_browsing_context_id))
             },
-            EmbedderEvent::RaiseWebViewToTop(top_level_browsing_context_id) => {
-                forward_to_constellation!(self, RaiseWebViewToTop(top_level_browsing_context_id))
+            EmbedderEvent::RaiseWebViewToTop(top_level_browsing_context_id, hide_others) => {
+                forward_to_constellation!(
+                    self,
+                    RaiseWebViewToTop(top_level_browsing_context_id, hide_others)
+                )
             },
             EmbedderEvent::BlurWebView => forward_to_constellation!(self, BlurWebView),
 

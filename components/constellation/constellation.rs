@@ -1489,7 +1489,7 @@ where
                     rect,
                 ));
             },
-            FromCompositorMsg::ShowWebView(webview_id) => {
+            FromCompositorMsg::ShowWebView(webview_id, hide_others) => {
                 if self.webviews.get(webview_id).is_none() {
                     return warn!(
                         "{}: ShowWebView on unknown top-level browsing context",
@@ -1497,12 +1497,17 @@ where
                     );
                 }
                 self.compositor_proxy
-                    .send(CompositorMsg::ShowWebView(webview_id));
-                self.webviews.mark_webview_shown(webview_id);
-                self.notify_webview_visibility(
-                    webview_id,
-                    self.webviews.is_effectively_visible(webview_id),
-                );
+                    .send(CompositorMsg::ShowWebView(webview_id, hide_others));
+                if hide_others {
+                    for webview_id in self.webviews.mark_all_webviews_not_shown() {
+                        debug_assert_eq!(self.webviews.is_effectively_visible(webview_id), false);
+                        self.notify_webview_visibility(webview_id, false);
+                    }
+                }
+                if self.webviews.mark_webview_shown(webview_id) {
+                    debug_assert_eq!(self.webviews.is_effectively_visible(webview_id), true);
+                    self.notify_webview_visibility(webview_id, true);
+                }
             },
             FromCompositorMsg::HideWebView(webview_id) => {
                 if self.webviews.get(webview_id).is_none() {
@@ -1513,13 +1518,12 @@ where
                 }
                 self.compositor_proxy
                     .send(CompositorMsg::HideWebView(webview_id));
-                self.webviews.mark_webview_not_shown(webview_id);
-                self.notify_webview_visibility(
-                    webview_id,
-                    self.webviews.is_effectively_visible(webview_id),
-                );
+                if self.webviews.mark_webview_not_shown(webview_id) {
+                    debug_assert_eq!(self.webviews.is_effectively_visible(webview_id), false);
+                    self.notify_webview_visibility(webview_id, false);
+                }
             },
-            FromCompositorMsg::RaiseWebViewToTop(webview_id) => {
+            FromCompositorMsg::RaiseWebViewToTop(webview_id, hide_others) => {
                 if self.webviews.get(webview_id).is_none() {
                     return warn!(
                         "{}: RaiseWebViewToTop on unknown top-level browsing context",
@@ -1527,12 +1531,17 @@ where
                     );
                 }
                 self.compositor_proxy
-                    .send(CompositorMsg::RaiseWebViewToTop(webview_id));
-                self.webviews.mark_webview_shown(webview_id);
-                self.notify_webview_visibility(
-                    webview_id,
-                    self.webviews.is_effectively_visible(webview_id),
-                );
+                    .send(CompositorMsg::RaiseWebViewToTop(webview_id, hide_others));
+                if hide_others {
+                    for webview_id in self.webviews.mark_all_webviews_not_shown() {
+                        debug_assert_eq!(self.webviews.is_effectively_visible(webview_id), false);
+                        self.notify_webview_visibility(webview_id, false);
+                    }
+                }
+                if self.webviews.mark_webview_shown(webview_id) {
+                    debug_assert_eq!(self.webviews.is_effectively_visible(webview_id), true);
+                    self.notify_webview_visibility(webview_id, true);
+                }
             },
             FromCompositorMsg::FocusWebView(top_level_browsing_context_id) => {
                 if self.webviews.get(top_level_browsing_context_id).is_none() {
