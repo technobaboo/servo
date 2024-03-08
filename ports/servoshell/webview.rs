@@ -604,7 +604,10 @@ where
                         new_webview_id,
                         rect,
                     ));
-                    self.queue_embedder_event(EmbedderEvent::RaiseWebViewToTop(new_webview_id));
+                    self.queue_embedder_event(EmbedderEvent::RaiseWebViewToTop(
+                        new_webview_id,
+                        true,
+                    ));
                     self.queue_embedder_event(EmbedderEvent::FocusWebView(new_webview_id));
                 },
                 EmbedderMsg::WebViewClosed(webview_id) => {
@@ -617,6 +620,7 @@ where
                         if let Some(&last_focused_webview_id) = self.focus_order.last() {
                             self.queue_embedder_event(EmbedderEvent::RaiseWebViewToTop(
                                 last_focused_webview_id,
+                                true,
                             ));
                             self.queue_embedder_event(EmbedderEvent::FocusWebView(
                                 last_focused_webview_id,
@@ -745,7 +749,9 @@ where
                 EmbedderMsg::EventDelivered(event) => match (webview_id, event) {
                     (Some(webview_id), CompositorEventVariant::MouseButtonEvent) => {
                         trace!("{}: Got a mouse button event", webview_id);
-                        self.queue_embedder_event(EmbedderEvent::RaiseWebViewToTop(webview_id));
+                        self.queue_embedder_event(EmbedderEvent::RaiseWebViewToTop(
+                            webview_id, true,
+                        ));
                         self.queue_embedder_event(EmbedderEvent::FocusWebView(webview_id));
                     },
                     (_, _) => {},
