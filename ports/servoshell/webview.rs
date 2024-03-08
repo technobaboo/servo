@@ -749,10 +749,12 @@ where
                 EmbedderMsg::EventDelivered(event) => match (webview_id, event) {
                     (Some(webview_id), CompositorEventVariant::MouseButtonEvent) => {
                         trace!("{}: Got a mouse button event", webview_id);
-                        self.queue_embedder_event(EmbedderEvent::RaiseWebViewToTop(
-                            webview_id, true,
-                        ));
-                        self.queue_embedder_event(EmbedderEvent::FocusWebView(webview_id));
+                        if self.focused_webview_id != Some(webview_id) {
+                            self.queue_embedder_event(EmbedderEvent::RaiseWebViewToTop(
+                                webview_id, true,
+                            ));
+                            self.queue_embedder_event(EmbedderEvent::FocusWebView(webview_id));
+                        }
                     },
                     (_, _) => {},
                 },
