@@ -550,8 +550,12 @@ impl LayoutThread {
                     &self.font_cache_sender,
                     self.debug.load_webfonts_synchronously,
                 );
-            self.outstanding_web_fonts
-                .fetch_add(newly_loading_font_count, Ordering::SeqCst);
+            if !self.debug.load_webfonts_synchronously {
+                self.outstanding_web_fonts
+                    .fetch_add(newly_loading_font_count, Ordering::SeqCst);
+            } else if newly_loading_font_count > 0 {
+                font_context::invalidate_font_caches();
+            }
         }
     }
 

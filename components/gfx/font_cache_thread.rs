@@ -548,12 +548,12 @@ impl FontCacheThread {
                 ))
                 .unwrap();
 
-            // Either increment the count of loading web fonts, or wait for a synchronous load.
+            // Wait for a the load to complete if loading the fonts synchronously.
             if let Some(ref receiver) = receiver {
                 receiver.recv().unwrap();
-            } else {
-                number_loading += 1;
             }
+
+            number_loading += 1;
         });
 
         number_loading
