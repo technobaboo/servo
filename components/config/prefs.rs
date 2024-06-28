@@ -368,6 +368,10 @@ mod gen {
                         spherical: bool,
                         cubemap: bool,
                     },
+                    openxr: {
+                        #[serde(default)]
+                        enabled: bool,
+                    },
                     hands: {
                         #[serde(default)]
                         enabled: bool,

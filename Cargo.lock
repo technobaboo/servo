@@ -4461,6 +4461,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3fdb12b2476b595f9358c5161aa467c2438859caa136dec86c26fdd2efe17b92"
 
 [[package]]
+name = "openxr"
+version = "0.18.0"
+source = "git+https://github.com/technobaboo/openxrs?branch=monado-egl#14ab782e44d53163f9efeddb522baf1567196697"
+dependencies = [
+ "libc",
+ "libloading 0.8.4",
+ "ndk-context",
+ "openxr-sys",
+]
+
+[[package]]
+name = "openxr-sys"
+version = "0.10.0"
+source = "git+https://github.com/technobaboo/openxrs?branch=monado-egl#14ab782e44d53163f9efeddb522baf1567196697"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "option-operations"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6194,8 +6213,6 @@ dependencies = [
 [[package]]
 name = "surfman"
 version = "0.9.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ef31fb4346fc13b83872a73fa2a1f4856dbf3ab3eb3495b32fb41c26ec8cc7a"
 dependencies = [
  "bitflags 1.3.2",
  "cfg_aliases 0.1.1",
@@ -7354,7 +7371,6 @@ dependencies = [
 [[package]]
 name = "webxr"
 version = "0.0.1"
-source = "git+https://github.com/servo/webxr#88fd368d1cc110db0f6f5000de2e22a14c9423b5"
 dependencies = [
  "android_injected_glue",
  "bindgen",
@@ -7363,17 +7379,19 @@ dependencies = [
  "gl_generator",
  "gvr-sys",
  "log",
+ "openxr",
  "serde",
  "sparkle",
  "surfman",
  "time 0.1.45",
  "webxr-api",
+ "winapi",
+ "wio",
 ]
 
 [[package]]
 name = "webxr-api"
 version = "0.0.1"
-source = "git+https://github.com/servo/webxr#88fd368d1cc110db0f6f5000de2e22a14c9423b5"
 dependencies = [
  "euclid",
  "ipc-channel",

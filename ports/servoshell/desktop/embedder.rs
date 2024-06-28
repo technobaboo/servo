@@ -7,17 +7,16 @@
 use servo::compositing::windowing::EmbedderMethods;
 use servo::embedder_traits::{EmbedderProxy, EventLoopWaker};
 use servo::servo_config::pref;
-use webxr::glwindow::GlWindowDiscovery;
 
 pub struct EmbedderCallbacks {
     event_loop_waker: Box<dyn EventLoopWaker>,
-    xr_discovery: Option<GlWindowDiscovery>,
+    xr_discovery: Option<webxr::Discovery>,
 }
 
 impl EmbedderCallbacks {
     pub fn new(
         event_loop_waker: Box<dyn EventLoopWaker>,
-        xr_discovery: Option<GlWindowDiscovery>,
+        xr_discovery: Option<webxr::Discovery>,
     ) -> EmbedderCallbacks {
         EmbedderCallbacks {
             event_loop_waker,

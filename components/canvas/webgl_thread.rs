@@ -3333,4 +3333,13 @@ impl<'a> WebXRContexts<WebXRSurfman> for WebXRBridgeContexts<'a> {
         )?;
         Some(&data.gl)
     }
+    fn bound_context_id(&self) -> Option<WebXRContextId> {
+        dbg!(self
+            .contexts
+            .keys()
+            .map(|k| &k.0)
+            .map(ToString::to_string)
+            .reduce(|a, b| format!("{a}, {b}")));
+        self.contexts.keys().cloned().next().map(Into::into)
+    }
 }

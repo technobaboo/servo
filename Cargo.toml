@@ -179,3 +179,14 @@ debug-assertions = false
 #
 # [patch."https://github.com/servo/<repository>"]
 # <crate> = { path = "/path/to/local/checkout" }
+
+surfman = { path = "../surfman" }
+openxr = { git = "https://github.com/technobaboo/openxrs", branch = "monado-egl" }
+
+
+[patch."https://github.com/servo/webxr"]
+webxr = { path = "../servo-webxr/webxr" }
+webxr-api = { path = "../servo-webxr/webxr-api" }
+
+# [patch."https://github.com/Ralith/openxrs.git"]
+# [patch.crates-io.openxr]
